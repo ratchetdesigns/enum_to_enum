@@ -1,0 +1,14 @@
+[package]
+name = "from_enum"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0.74", features = ["full", "extra-traits", "printing", "visit"] }
+quote = "1.0"
+
+[dev-dependencies]
+trybuild = "1.0.25"
