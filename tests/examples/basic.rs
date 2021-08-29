@@ -28,7 +28,7 @@ enum SimpleDest {
 enum CompoundDest {
     Case1(),
 
-    #[from_case(Src = OtherCase2)]
+    #[from_case(Src = OtherCase2, Src = OtherCase1)]
     MyCase2(),
 }
 

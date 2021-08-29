@@ -1,7 +1,7 @@
 extern crate proc_macro;
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{HashSet, HashMap, hash_map::Entry};
 use std::convert::From;
 use proc_macro::TokenStream;
 use syn::{parse, parse2, parenthesized,
@@ -44,19 +44,25 @@ trait MergeIn {
     fn merge_in(&mut self, other: Self);
 }
 
-impl<K: Eq + std::hash::Hash, V> MergeIn for HashMap<K, Vec<V>> {
+impl<K: Eq + std::hash::Hash, Vs: MergeIn> MergeIn for HashMap<K, Vs> {
     fn merge_in(&mut self, other: Self) {
         other.into_iter()
             .for_each(|(k, vs)| {
                 match self.entry(k) {
                     Entry::Occupied(mut occ) => {
-                        occ.get_mut().extend(vs);
+                        occ.get_mut().merge_in(vs);
                     },
                     Entry::Vacant(vac) => {
                         vac.insert(vs);
                     },
                 }
             });
+    }
+}
+
+impl<T> MergeIn for Vec<T> {
+    fn merge_in(&mut self, other: Self) {
+        self.extend(other);
     }
 }
 
@@ -74,7 +80,8 @@ impl MatchesIdent for Path {
 
 #[derive(Debug, Default)]
 struct EnumParser {
-    src_names: Vec<Path>,
+    src_names: HashSet<Path>,
+    src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
 }
 
 impl<'ast> EnumParser {
@@ -108,10 +115,18 @@ impl<'ast> EnumParser {
             .fold(
                 HashMap::new(),
                 |mut m, attr| {
-                    println!("ATTR: {:?}, META: {:?}", attr, attr.parse_meta());
-                    let new_attrs = parse2::<FromCaseAttr>(attr.tokens.clone().into());
-                    if new_attrs.is_ok() {
-                        m.merge_in(new_attrs.unwrap().into_src_cases_by_src());
+                    if let Ok(new_attrs) = parse2::<FromCaseAttr>(attr.tokens.clone().into()) {
+                        let new_src_cases_by_src = new_attrs.into_src_cases_by_src();
+                        let known_srcs = new_src_cases_by_src.iter()
+                            .all(|(src_enum, _)| match src_enum {
+                                SrcEnum::All() => true,
+                                SrcEnum::Single(ref src_enum) => self.src_names.contains(src_enum),
+                            });
+                        if !known_srcs {
+                            panic!("Unknown source enum");
+                        }
+
+                        m.merge_in(new_src_cases_by_src);
                     }
 
                     m
@@ -127,7 +142,9 @@ impl<'ast> Visit<'ast> for EnumParser {
 
     fn visit_variant(&mut self, node: &'ast Variant) {
         let src_cases_by_src = self.parse_from_case_attrs(&node.attrs);
-        println!("SRC CASES! {:?}", src_cases_by_src);
+        let mut src_cases_by_src_by_dest = HashMap::new();
+        src_cases_by_src_by_dest.insert(node.clone(), src_cases_by_src);
+        self.src_cases_by_src_by_dest.merge_in(src_cases_by_src_by_dest);
     }
 }
 
@@ -150,7 +167,7 @@ impl CaseMatch {
 
 impl Parse for CaseMatch {
     fn parse(input: ParseStream) -> ParseResult<Self> {
-        let parts: Vec<Path> = Punctuated::<Path, Token![=]>::parse_terminated(input)?.into_iter().collect();
+        let parts: Vec<Path> = Punctuated::<Path, Token![=]>::parse_separated_nonempty(input)?.into_iter().collect();
         let parts: &[Path] = &parts;
 
         match parts {
@@ -210,6 +227,8 @@ fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
     if parser.src_names.is_empty() {
         panic!("#[from_enum(Src)] must appear at least once to specify the source enum");
     }
+
+    println!("SRC {:?}", &parser.src_cases_by_src_by_dest);
 
     let dest = &enm.ident;
     let impls = parser.src_names
