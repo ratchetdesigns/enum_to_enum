@@ -24,8 +24,7 @@ enum SimpleDest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
-#[from_enum(Src)]
-#[from_enum(inner::Src)]
+#[from_enum(Src, inner::Src)]
 enum CompoundDest {
     Case1(),
 
@@ -35,4 +34,5 @@ enum CompoundDest {
 
 fn main() {
     assert_eq!(SimpleDest::from(Src::Case1()), SimpleDest::Case1());
+    assert_eq!(CompoundDest::from(inner::Src::C1()), CompoundDest::Case1());
 }
