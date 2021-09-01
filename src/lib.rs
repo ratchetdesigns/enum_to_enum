@@ -12,8 +12,9 @@ use syn::{
     parse::{Error as ParseError, Parse, ParseStream, Result as ParseResult},
     parse2,
     punctuated::Punctuated,
+    token::{Comma as CommaToken, Eq as EqToken},
     visit::{visit_item_enum, Visit},
-    Attribute, Fields, Ident, ItemEnum, Meta, MetaList, NestedMeta, Path, Token, Type, Variant,
+    Attribute, Fields, Ident, ItemEnum, Path, Token, Type, Variant,
 };
 
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
@@ -183,35 +184,20 @@ impl MatchesIdent for Path {
 #[derive(Debug, Default)]
 struct EnumParser {
     src_names: HashSet<Path>,
+    effect_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
 }
 
 impl<'ast> EnumParser {
     fn parse_from_enum_attr(&mut self, node: &'ast Attribute) {
-        println!("META: {:?}", node.parse_meta());
-        self.src_names.extend::<Vec<Path>>(
-            node.parse_meta()
-                .map(|meta| match meta {
-                    Meta::List(MetaList { path, nested, .. }) => {
-                        if !path.matches_ident("from_enum") {
-                            return Default::default();
-                        }
+        if !node.path.matches_ident("from_enum") {
+            return;
+        }
 
-                        nested
-                            .into_iter()
-                            .filter_map(|m| match m {
-                                NestedMeta::Meta(m) => match m {
-                                    Meta::Path(p) => Some(p),
-                                    _ => None,
-                                },
-                                _ => None,
-                            })
-                            .collect()
-                    }
-                    _ => Default::default(),
-                })
-                .unwrap_or_default(),
-        );
+        if let Ok(from_enum_attr) = parse2::<FromEnumAttr>(node.tokens.clone()) {
+            self.src_names.extend(from_enum_attr.sources);
+            self.effect_name = from_enum_attr.effect;
+        }
     }
 
     fn parse_from_case_attrs(&self, attrs: &'ast Vec<Attribute>) -> SrcCasesBySrc {
@@ -305,13 +291,41 @@ mod enum_parser_tests {
     use super::*;
 
     #[test]
-    fn parse_from_enum() -> Result<(), ParseError> {
+    fn parse_from_enum_single_src() -> Result<(), ParseError> {
+        let toks = quote! {
+            #[from_enum(Src1)]
+            enum Dest {
+                Case1(),
+                Case2(),
+            }
+        };
+        let enm: ItemEnum = parse2(toks.into())?;
+        let mut parser = EnumParser::default();
+        visit_item_enum(&mut parser, &enm);
+
+        let src_names = &parser.src_names;
+        let assert_has_src_name = |src: &str| {
+            assert!(src_names.iter().any(|n| {
+                let src = format_ident!("{}", src);
+                let lhs = quote! { #n };
+                let rhs = quote! { #src };
+
+                lhs.to_string() == rhs.to_string()
+            }));
+        };
+
+        assert_has_src_name("Src1");
+        assert_eq!(parser.effect_name, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_from_enum_multiple_srcs() -> Result<(), ParseError> {
         let toks = quote! {
             #[from_enum(Src1, Src2)]
             enum Dest {
                 Case1(),
-
-                #[from_case(C2)]
                 Case2(),
             }
         };
@@ -332,6 +346,42 @@ mod enum_parser_tests {
 
         assert_has_src_name("Src1");
         assert_has_src_name("Src2");
+
+        assert_eq!(parser.effect_name, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_from_enum_srcs_and_effects() -> Result<(), ParseError> {
+        let toks = quote! {
+            #[from_enum(Src1, effect_type = MyEffect)]
+            enum Dest {
+                Case1(),
+                Case2(),
+            }
+        };
+        let enm: ItemEnum = parse2(toks.into())?;
+        let mut parser = EnumParser::default();
+        visit_item_enum(&mut parser, &enm);
+
+        let src_names = &parser.src_names;
+        let assert_has_src_name = |src: &str| {
+            assert!(src_names.iter().any(|n| {
+                let src = format_ident!("{}", src);
+                let lhs = quote! { #n };
+                let rhs = quote! { #src };
+
+                lhs.to_string() == rhs.to_string()
+            }));
+        };
+
+        assert_has_src_name("Src1");
+
+        assert_eq!(
+            parser.effect_name.unwrap().get_ident().unwrap().to_string(),
+            String::from("MyEffect")
+        );
 
         Ok(())
     }
@@ -405,6 +455,38 @@ impl Parse for FromCaseAttr {
         Ok(FromCaseAttr {
             case_matches: case_matches.into_iter().collect(),
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FromEnumAttr {
+    sources: Vec<Path>,
+    effect: Option<Path>,
+}
+
+impl Parse for FromEnumAttr {
+    fn parse(input: ParseStream) -> ParseResult<Self> {
+        let content;
+        parenthesized!(content in input);
+        let mut sources: Vec<Path> = vec![];
+        let mut effect: Option<Path> = None;
+
+        loop {
+            let lhs: Path = content.parse()?;
+            if content.peek(Token![=]) {
+                content.parse::<EqToken>()?; // skip =
+                let rhs: Path = content.parse()?;
+                effect.replace(rhs);
+            } else {
+                sources.push(lhs);
+            }
+
+            if content.peek(Token![,]) {
+                content.parse::<CommaToken>()?;
+            } else {
+                return Ok(FromEnumAttr { sources, effect });
+            }
+        }
     }
 }
 
