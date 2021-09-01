@@ -55,6 +55,21 @@ enum FallibleDest {
     C3(u8),
 }
 
+enum MyEffect {
+    Log(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
+#[from_enum(Src, effect_type = MyEffect)]
+enum EffectDest {
+    Case1(String),
+
+    #[from_case(Case2)]
+    MyCase2(),
+
+    Case3 { a: String },
+}
+
 fn main() {
     assert_eq!(
         SimpleDest::from(Src::Case1("hi".to_string())),

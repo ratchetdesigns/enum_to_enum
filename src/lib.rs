@@ -8,7 +8,7 @@ use std::convert::From;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::fs::File;
 use syn::{
-    parenthesized, parse,
+    parenthesized,
     parse::{Error as ParseError, Parse, ParseStream, Result as ParseResult},
     parse2,
     punctuated::Punctuated,
@@ -18,14 +18,14 @@ use syn::{
 
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
 pub fn derive_enum_from(input: TokenStream) -> TokenStream {
-    let result = from_enum_internal(input).unwrap_or_else(|_err| {
+    let result = from_enum_internal(input.into()).unwrap_or_else(|_err| {
         panic!("Failed to parse input");
     });
 
     let mut file = File::create("output.rs").expect("failed to create file");
     std::io::Write::write_all(&mut file, result.to_string().as_bytes()).expect("failed to write");
 
-    result
+    result.into()
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +188,7 @@ struct EnumParser {
 
 impl<'ast> EnumParser {
     fn parse_from_enum_attr(&mut self, node: &'ast Attribute) {
+        println!("META: {:?}", node.parse_meta());
         self.src_names.extend::<Vec<Path>>(
             node.parse_meta()
                 .map(|meta| match meta {
@@ -299,6 +300,43 @@ impl<'ast> Visit<'ast> for EnumParser {
     }
 }
 
+#[cfg(test)]
+mod enum_parser_tests {
+    use super::*;
+
+    #[test]
+    fn parse_from_enum() -> Result<(), ParseError> {
+        let toks = quote! {
+            #[from_enum(Src1, Src2)]
+            enum Dest {
+                Case1(),
+
+                #[from_case(C2)]
+                Case2(),
+            }
+        };
+        let enm: ItemEnum = parse2(toks.into())?;
+        let mut parser = EnumParser::default();
+        visit_item_enum(&mut parser, &enm);
+
+        let src_names = &parser.src_names;
+        let assert_has_src_name = |src: &str| {
+            assert!(src_names.iter().any(|n| {
+                let src = format_ident!("{}", src);
+                let lhs = quote! { #n };
+                let rhs = quote! { #src };
+
+                lhs.to_string() == rhs.to_string()
+            }));
+        };
+
+        assert_has_src_name("Src1");
+        assert_has_src_name("Src2");
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CaseMatch {
     src_enum: SrcEnum,
@@ -370,8 +408,8 @@ impl Parse for FromCaseAttr {
     }
 }
 
-fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
-    let enm: ItemEnum = parse(input)?;
+fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
+    let enm: ItemEnum = parse2(input)?;
     let mut parser = EnumParser::default();
     visit_item_enum(&mut parser, &enm);
     if parser.src_names.is_empty() {
@@ -438,8 +476,7 @@ fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
 
     Ok(quote! {
         #(#impls)*
-    }
-    .into())
+    })
 }
 
 #[derive(Debug, Clone)]
