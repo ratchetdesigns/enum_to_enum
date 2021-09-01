@@ -50,7 +50,7 @@ enum FallibleDest {
     #[from_case(C1)]
     C1(u8),
     #[from_case(C1, C2)]
-    C2(u8),
+    C2(u16),
     #[from_case(C2)]
     C3(u8),
 }
@@ -63,5 +63,13 @@ fn main() {
     assert_eq!(
         CompoundDest::from(inner::Src::C1("a".to_string())),
         CompoundDest::Case1("a".to_string())
+    );
+    assert_eq!(
+        FallibleDest::from(FallibleSrc::C1(100u16)),
+        FallibleDest::C1(100u8)
+    );
+    assert_eq!(
+        FallibleDest::from(FallibleSrc::C1(300u16)),
+        FallibleDest::C2(300u16),
     );
 }
