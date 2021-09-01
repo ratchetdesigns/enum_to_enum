@@ -5,6 +5,7 @@ use from_enum::FromEnum;
 enum Src {
     Case1(String),
     Case2(),
+    Case3 { a: String },
 }
 
 mod inner {
@@ -21,6 +22,8 @@ enum SimpleDest {
 
     #[from_case(Case2)]
     MyCase2(),
+
+    Case3 { a: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
@@ -31,6 +34,9 @@ enum CompoundDest {
 
     #[from_case(Src = Case2, inner::Src = C2)]
     MyCase2(),
+
+    #[from_case(Src = Case3)]
+    Case3 { a: String }
 }
 
 fn main() {

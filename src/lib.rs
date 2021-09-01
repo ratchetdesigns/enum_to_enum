@@ -37,7 +37,14 @@ impl ConversionCfg {
     fn to_args<T: Fn(&Ident) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
         match &self.dest.fields {
             Fields::Unit => quote! {},
-            Fields::Named(_) => quote! {()},
+            Fields::Named(named) => {
+                let args = named.named
+                    .iter()
+                    .map(|field| field.ident.as_ref().unwrap())
+                    .map(|id| xform(&id));
+
+                quote! { { #(#args),* } }
+            },
             Fields::Unnamed(unnamed) => {
                 let args = unnamed.unnamed
                     .iter()
@@ -64,7 +71,16 @@ impl ConversionCfg {
                     #dest::#dest_case
                 }
             },
-            (Fields::Named(named), _) => panic!("named"),
+            (Fields::Named(named), true) => panic!("named"),
+            (Fields::Named(named), false) => {
+                let args = self.to_args(|id| quote! {
+                    #id: #id.into()
+                });
+
+                quote! {
+                    #dest::#dest_case #args
+                }
+            },
             (Fields::Unnamed(unnamed), true) => {
                 panic!("oops");
             },
