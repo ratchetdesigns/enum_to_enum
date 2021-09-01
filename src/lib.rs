@@ -2,12 +2,12 @@ extern crate proc_macro;
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::collections::{HashSet, HashMap, hash_map::Entry};
-use std::convert::{From, identity};
+use std::convert::From;
 use std::fs::File;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{parse, parse2, parenthesized,
-          ItemEnum, Attribute, Meta, MetaList, NestedMeta, Path, Variant, Ident, Token, Fields,
+          ItemEnum, Attribute, Meta, MetaList, NestedMeta, Path, Variant, Ident, Token, Fields, Type,
           punctuated::Punctuated,
           parse::{Error as ParseError, Parse, ParseStream, Result as ParseResult},
           visit::{Visit, visit_item_enum}};
@@ -34,27 +34,55 @@ struct ConversionCfg {
 }
 
 impl ConversionCfg {
-    fn to_args<T: Fn(&Ident) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
+    fn to_args<T: Fn(&Ident, &Type) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
         match &self.dest.fields {
             Fields::Unit => quote! {},
             Fields::Named(named) => {
                 let args = named.named
                     .iter()
-                    .map(|field| field.ident.as_ref().unwrap())
-                    .map(|id| xform(&id));
+                    .map(|field| {
+                        xform(
+                            field.ident.as_ref().unwrap(),
+                            &field.ty
+                        )
+                    });
 
-                quote! { { #(#args),* } }
+                quote! {
+                    #(#args),*
+                }
             },
             Fields::Unnamed(unnamed) => {
                 let args = unnamed.unnamed
                     .iter()
                     .enumerate()
-                    .map(|(i, _field)| {
-                        format_ident!("arg{}", i)
-                    })
-                    .map(|id| xform(&id));
+                    .map(|(i, field)| {
+                        xform(
+                            &format_ident!("arg{}", i),
+                            &field.ty
+                        )
+                    });
 
-                quote! { (#(#args),*) }
+                quote! {
+                    #(#args),*
+                }
+            },
+        }
+    }
+
+    fn to_wrapped_args<T: Fn(&Ident) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
+        let args = self.to_args(|id, _| xform(id));
+
+        match &self.dest.fields {
+            Fields::Unit => quote! {},
+            Fields::Named(_) => {
+                quote! {
+                    { #args }
+                }
+            },
+            Fields::Unnamed(_) => {
+                quote! {
+                    (#args)
+                }
             },
         }
     }
@@ -62,6 +90,12 @@ impl ConversionCfg {
     fn to_case_match(&self, dest: &Ident, use_try_from: bool) -> TokenStream2 {
         let dest_case = &self.dest.ident;
         let fields = &self.dest.fields;
+        let try_type = if use_try_from {
+            quote! { }
+        } else {
+            quote! { .into() }
+        };
+
         match (fields, use_try_from) {
             (Fields::Unit, true) => {
                 panic!("multiple source options found for a single destination and the source does not have a field to try_from");
@@ -71,22 +105,18 @@ impl ConversionCfg {
                     #dest::#dest_case
                 }
             },
-            (Fields::Named(named), true) => panic!("named"),
-            (Fields::Named(named), false) => {
-                let args = self.to_args(|id| quote! {
-                    #id: #id.into()
+            (Fields::Named(_), _) => {
+                let args = self.to_wrapped_args(|id| quote! {
+                    #id: #id#try_type
                 });
 
                 quote! {
                     #dest::#dest_case #args
                 }
             },
-            (Fields::Unnamed(unnamed), true) => {
-                panic!("oops");
-            },
-            (Fields::Unnamed(unnamed), false) => {
-                let args = self.to_args(|id| quote! {
-                    #id.into()
+            (Fields::Unnamed(_), _) => {
+                let args = self.to_wrapped_args(|id| quote! {
+                    #id#try_type
                 });
 
                 quote! {
@@ -355,7 +385,6 @@ fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
     }
 
     let dest = &enm.ident;
-    let src_names = &parser.src_names;
     let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
 
     let impls = conversion_cfgs_by_src_case_by_src
@@ -368,29 +397,43 @@ fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
                         .map(|conversion_cfg| {
                             conversion_cfg.to_case_match(dest, use_try_from)
                         });
-                    let args = conversion_cfgs.first()
-                        .unwrap()
-                        .to_args(|arg| quote! { #arg });
+                    let example_conversion_cfg = conversion_cfgs.first()
+                        .unwrap();
                     let match_result = if use_try_from {
-                        // TODO: make lazy
+                        let lhs = example_conversion_cfg
+                            .to_args(|arg, _| quote! { Ok(#arg) });
+                        let rhs = example_conversion_cfg
+                            .to_args(|arg, _| quote! { #arg.try_into() });
+                        let conversions = conversions.map(|c| quote! {
+                            if let (#lhs) = (#rhs) {
+                                return #c;
+                            }
+                        });
+
                         quote! {
-                            vec![#(#conversions),*].iter()
-                                .filter_map(identity)
-                                .first()
-                                .expect("no conversions matched for #src_name::#case")
+                            #(#conversions)*
+                            unreachable!();
                         }
                     } else {
                         quote! { #(#conversions)* }
                     };
 
+                    let args = example_conversion_cfg
+                        .to_wrapped_args(|arg| quote! { #arg });
+
                     quote! {
-                        #src_name::#case #args => #match_result
+                        #src_name::#case #args => {
+                            #match_result
+                        }
                     }
                 });
 
             quote! {
                 impl std::convert::From<#src_name> for #dest {
                     fn from(src: #src_name) -> #dest {
+                        use std::convert::Into;
+                        use std::convert::TryInto;
+
                         match src {
                             #(#cases),*
                         }

@@ -39,6 +39,22 @@ enum CompoundDest {
     Case3 { a: String }
 }
 
+enum FallibleSrc {
+    C1(u16),
+    C2(u16),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
+#[from_enum(FallibleSrc)]
+enum FallibleDest {
+    #[from_case(C1)]
+    C1(u8),
+    #[from_case(C1, C2)]
+    C2(u8),
+    #[from_case(C2)]
+    C3(u8),
+}
+
 fn main() {
     assert_eq!(
         SimpleDest::from(Src::Case1("hi".to_string())),
