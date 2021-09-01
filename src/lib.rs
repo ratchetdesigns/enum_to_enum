@@ -2,11 +2,12 @@ extern crate proc_macro;
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::collections::{HashSet, HashMap, hash_map::Entry};
-use std::convert::From;
+use std::convert::{From, identity};
 use std::fs::File;
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use syn::{parse, parse2, parenthesized,
-          ItemEnum, Attribute, Meta, MetaList, NestedMeta, Path, Variant, Ident, Token,
+          ItemEnum, Attribute, Meta, MetaList, NestedMeta, Path, Variant, Ident, Token, Fields,
           punctuated::Punctuated,
           parse::{Error as ParseError, Parse, ParseStream, Result as ParseResult},
           visit::{Visit, visit_item_enum}};
@@ -30,6 +31,54 @@ pub fn derive_enum_from(input: TokenStream) -> TokenStream {
 struct ConversionCfg {
     src_case: SrcCase,
     dest: Variant,
+}
+
+impl ConversionCfg {
+    fn to_args<T: Fn(&Ident) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
+        match &self.dest.fields {
+            Fields::Unit => quote! {},
+            Fields::Named(_) => quote! {()},
+            Fields::Unnamed(unnamed) => {
+                let args = unnamed.unnamed
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _field)| {
+                        format_ident!("arg{}", i)
+                    })
+                    .map(|id| xform(&id));
+
+                quote! { (#(#args),*) }
+            },
+        }
+    }
+
+    fn to_case_match(&self, dest: &Ident, use_try_from: bool) -> TokenStream2 {
+        let dest_case = &self.dest.ident;
+        let fields = &self.dest.fields;
+        match (fields, use_try_from) {
+            (Fields::Unit, true) => {
+                panic!("multiple source options found for a single destination and the source does not have a field to try_from");
+            },
+            (Fields::Unit, false) => {
+                quote! {
+                    #dest::#dest_case
+                }
+            },
+            (Fields::Named(named), _) => panic!("named"),
+            (Fields::Unnamed(unnamed), true) => {
+                panic!("oops");
+            },
+            (Fields::Unnamed(unnamed), false) => {
+                let args = self.to_args(|id| quote! {
+                    #id.into()
+                });
+
+                quote! {
+                    #dest::#dest_case #args
+                }
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -298,9 +347,28 @@ fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
         .map(|(src_name, conversion_cfgs_by_src_case)| {
             let cases = conversion_cfgs_by_src_case.iter()
                 .map(|(case, conversion_cfgs)| {
-                    let dest_case = &conversion_cfgs.get(0).unwrap().dest.ident;
+                    let use_try_from = conversion_cfgs.len() > 1;
+                    let conversions = conversion_cfgs.iter()
+                        .map(|conversion_cfg| {
+                            conversion_cfg.to_case_match(dest, use_try_from)
+                        });
+                    let args = conversion_cfgs.first()
+                        .unwrap()
+                        .to_args(|arg| quote! { #arg });
+                    let match_result = if use_try_from {
+                        // TODO: make lazy
+                        quote! {
+                            vec![#(#conversions),*].iter()
+                                .filter_map(identity)
+                                .first()
+                                .expect("no conversions matched for #src_name::#case")
+                        }
+                    } else {
+                        quote! { #(#conversions)* }
+                    };
+
                     quote! {
-                        #src_name::#case() => #dest::#dest_case()
+                        #src_name::#case #args => #match_result
                     }
                 });
 

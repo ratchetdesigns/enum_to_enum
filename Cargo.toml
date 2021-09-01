@@ -9,6 +9,7 @@ proc-macro = true
 [dependencies]
 syn = { version = "1.0.74", features = ["full", "extra-traits", "printing", "visit"] }
 quote = "1.0"
+proc-macro2 = "1.0.24"
 
 [dev-dependencies]
 trybuild = "1.0.25"
