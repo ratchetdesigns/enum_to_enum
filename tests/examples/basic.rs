@@ -19,16 +19,17 @@ mod inner {
 enum SimpleDest {
     Case1(),
 
-    #[from_case(OtherCase2)]
+    #[from_case(Case2)]
     MyCase2(),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
 #[from_enum(Src, inner::Src)]
 enum CompoundDest {
+    #[from_case(inner::Src = C1, Src = Case1)]
     Case1(),
 
-    #[from_case(Src = OtherCase2, Src = OtherCase1)]
+    #[from_case(Src = Case2, inner::Src = C2)]
     MyCase2(),
 }
 

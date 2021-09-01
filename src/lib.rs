@@ -3,6 +3,7 @@ extern crate proc_macro;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::collections::{HashSet, HashMap, hash_map::Entry};
 use std::convert::From;
+use std::fs::File;
 use proc_macro::TokenStream;
 use syn::{parse, parse2, parenthesized,
           ItemEnum, Attribute, Meta, MetaList, NestedMeta, Path, Variant, Ident, Token,
@@ -13,10 +14,16 @@ use quote::{quote, format_ident};
 
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
 pub fn derive_enum_from(input: TokenStream) -> TokenStream {
-    from_enum_internal(input)
+    let result = from_enum_internal(input)
         .unwrap_or_else(|_err| {
             panic!("Failed to parse input");
-        })
+        });
+
+    let mut file = File::create("output.rs").expect("failed to create file");
+    std::io::Write::write_all(&mut file, result.to_string().as_bytes())
+        .expect("failed to write");
+
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +146,44 @@ impl<'ast> EnumParser {
                 }
             )
     }
+
+    fn conversion_cfgs_by_src_case_by_src(&self) -> HashMap<Path, HashMap<Ident, Vec<ConversionCfg>>> {
+        let src_names = &self.src_names;
+
+        self.src_cases_by_src_by_dest
+            .iter()
+            .fold(
+                HashMap::new(),
+                |mut conversion_cfgs_by_src_case_by_src, (dest, src_cases_by_src)| {
+                    src_cases_by_src.iter()
+                        .for_each(|(src, src_cases)| {
+                            let mut m: HashMap<Path, HashMap<Ident, Vec<ConversionCfg>>> = HashMap::new();
+                            let conversion_cfgs_by_src_case = src_cases.iter()
+                                .map(|src_case| (
+                                    src_case.case_name.clone(),
+                                    vec![ConversionCfg {
+                                        src_case: src_case.clone(),
+                                        dest: dest.clone()
+                                    }]
+                                ))
+                                .collect();
+
+                            match src {
+                                SrcEnum::Single(src) => {
+                                    m.insert(src.clone(), conversion_cfgs_by_src_case);
+                                },
+                                SrcEnum::All() => {
+                                    for src in src_names {
+                                        m.insert(src.clone(), conversion_cfgs_by_src_case.clone());
+                                    }
+                                },
+                            };
+                            conversion_cfgs_by_src_case_by_src.merge_in(m);
+                        });
+                    conversion_cfgs_by_src_case_by_src
+                }
+            )
+    }
 }
 
 impl<'ast> Visit<'ast> for EnumParser {
@@ -246,49 +291,25 @@ fn from_enum_internal(input: TokenStream) -> Result<TokenStream, Error> {
 
     let dest = &enm.ident;
     let src_names = &parser.src_names;
-    let conversion_cfg_by_src_case_by_src = parser.src_cases_by_src_by_dest
+    let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
+
+    let impls = conversion_cfgs_by_src_case_by_src
         .iter()
-        .fold(
-            HashMap::new() as HashMap<Path, HashMap<Ident, Vec<ConversionCfg>>>,
-            |mut conversion_cfg_by_src_case_by_src, (dest, src_cases_by_src)| {
-                src_cases_by_src.iter()
-                    .for_each(|(src, src_cases)| {
-                        let mut m: HashMap<Path, HashMap<Ident, Vec<ConversionCfg>>> = HashMap::new();
-                        let conversion_cfgs_by_src_case = src_cases.iter()
-                            .map(|src_case| (
-                                src_case.case_name.clone(),
-                                vec![ConversionCfg {
-                                    src_case: src_case.clone(),
-                                    dest: dest.clone()
-                                }]
-                            ))
-                            .collect();
+        .map(|(src_name, conversion_cfgs_by_src_case)| {
+            let cases = conversion_cfgs_by_src_case.iter()
+                .map(|(case, conversion_cfgs)| {
+                    let dest_case = &conversion_cfgs.get(0).unwrap().dest.ident;
+                    quote! {
+                        #src_name::#case() => #dest::#dest_case()
+                    }
+                });
 
-                        match src {
-                            SrcEnum::Single(src) => {
-                                m.insert(src.clone(), conversion_cfgs_by_src_case);
-                            },
-                            SrcEnum::All() => {
-                                for src in src_names {
-                                    m.insert(src.clone(), conversion_cfgs_by_src_case.clone());
-                                }
-                            },
-                        };
-                        conversion_cfg_by_src_case_by_src.merge_in(m);
-                    });
-                conversion_cfg_by_src_case_by_src
-            }
-        );
-
-    println!("SRC {:?}", conversion_cfg_by_src_case_by_src);
-
-    let impls = parser.src_names
-        .iter()
-        .map(|src_name| {
             quote! {
                 impl std::convert::From<#src_name> for #dest {
                     fn from(src: #src_name) -> #dest {
-                        #dest::Case1()
+                        match src {
+                            #(#cases),*
+                        }
                     }
                 }
             }
