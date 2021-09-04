@@ -248,16 +248,25 @@ impl<'ast> EnumParser {
         let mut parser = EnumParser::default();
         let enm: ItemEnum = parse2(input)?;
         visit_item_enum(&mut parser, &enm);
-        if !parser.errors.is_empty() {
-            Err(parser.errors.into())
-        } else {
-            Ok(ParsedEnum {
-                src_names: parser.src_names,
-                effect_name: parser.effect_name,
-                src_cases_by_src_by_dest: parser.src_cases_by_src_by_dest,
-                dest: enm.ident.clone(),
-            })
+
+        if parser.src_names.is_empty() {
+            return Err(ParseError::new(
+                enm.span(),
+                "#[from_enum(Src)] must appear at least once to specify the source enum(s)",
+            ).into());
+            
         }
+
+        if !parser.errors.is_empty() {
+            return Err(parser.errors.into())
+        }
+
+        Ok(ParsedEnum {
+            src_names: parser.src_names,
+            effect_name: parser.effect_name,
+            src_cases_by_src_by_dest: parser.src_cases_by_src_by_dest,
+            dest: enm.ident.clone(),
+        })
     }
 
     fn parse_from_enum_attr(&mut self, node: &'ast Attribute) {
@@ -417,6 +426,21 @@ mod enum_parser_tests {
     }
 
     #[test]
+    fn parse_from_enum_srcs_no_from_enum() -> Result<(), Error> {
+        let toks = quote! {
+            enum Dest {
+                Case1(),
+                Case2(),
+            }
+        };
+        let res = EnumParser::parse(toks.into());
+
+        assert!(res.is_err());
+
+        Ok(())
+    }
+
+    #[test]
     fn parse_from_enum_srcs_bad_effect() -> Result<(), Error> {
         let toks = quote! {
             #[from_enum(Src1, effect_typeS = MyEffect)]
@@ -427,7 +451,6 @@ mod enum_parser_tests {
         };
         let res = EnumParser::parse(toks.into());
 
-        println!("HERE {:?}", res);
         assert!(res.is_err());
 
         Ok(())
@@ -547,9 +570,6 @@ impl Parse for FromEnumAttr {
 
 fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
     let parser = EnumParser::parse(input)?;
-    if parser.src_names.is_empty() {
-        panic!("#[from_enum(Src)] must appear at least once to specify the source enum");
-    }
 
     let dest = &parser.dest;
     let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
@@ -621,19 +641,6 @@ enum Error {
 }
 
 impl Error {
-    pub fn to_compile_errors(&self) -> Vec<TokenStream2> {
-        match self {
-            Self::SynError(x) => vec![x.to_compile_error()],
-            Self::CompoundError(x) => x
-                .iter()
-                .flat_map(|e| match e {
-                    Self::SynError(s) => vec![s.to_compile_error()],
-                    Self::CompoundError(_) => e.to_compile_errors(),
-                })
-                .collect(),
-        }
-    }
-
     pub fn into_compile_errors(self) -> Vec<TokenStream2> {
         match self {
             Self::SynError(x) => vec![x.into_compile_error()],
