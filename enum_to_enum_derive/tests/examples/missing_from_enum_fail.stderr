@@ -1,0 +1,5 @@
+error: #[from_enum(Src)] must appear at least once to specify the source enum(s)
+ --> $DIR/missing_from_enum_fail.rs:9:1
+  |
+9 | enum SimpleDest {
+  | ^^^^

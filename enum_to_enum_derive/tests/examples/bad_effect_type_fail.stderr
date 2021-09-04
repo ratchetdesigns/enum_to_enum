@@ -7,7 +7,7 @@ error: #[from_enum(Src)] must appear at least once to specify the source enum(s)
 error[E0601]: `main` function not found in crate `$CRATE`
   --> $DIR/bad_effect_type_fail.rs:1:1
    |
-1  | / use from_enum::FromEnum;
+1  | / use enum_to_enum::FromEnum;
 2  | |
 3  | | #[derive(Debug, Clone, PartialEq, Eq)]
 4  | | enum Src {

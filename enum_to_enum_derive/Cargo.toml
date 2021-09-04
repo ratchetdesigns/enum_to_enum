@@ -1,0 +1,16 @@
+[package]
+name = "enum_to_enum_derive"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0.74", features = ["full", "extra-traits", "printing", "visit"] }
+quote = "1.0"
+proc-macro2 = "1.0.24"
+
+[dev-dependencies]
+trybuild = "1.0.25"
+enum_to_enum = { version = "0.1.0", path = "../enum_to_enum" }

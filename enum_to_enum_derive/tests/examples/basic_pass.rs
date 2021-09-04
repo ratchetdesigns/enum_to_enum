@@ -1,5 +1,5 @@
 use std::convert::From;
-use from_enum::FromEnum;
+use enum_to_enum::FromEnum;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Src {

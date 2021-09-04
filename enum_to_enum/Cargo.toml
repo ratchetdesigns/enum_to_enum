@@ -1,0 +1,11 @@
+[package]
+name = "enum_to_enum"
+version = "0.1.0"
+authors = ["Adam Berger <adam@ratchetdesigns.com>"]
+license = "MIT"
+description = "Derives possibly effectful conversions between enums"
+include = ["README.md", "LICENSE-MIT", "src/**/*.rs"]
+edition = "2018"
+
+[dependencies]
+enum_to_enum_derive = { version = "=0.1.0", path = "../enum_to_enum_derive"}
