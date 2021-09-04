@@ -12,15 +12,19 @@ use syn::{
     parse::{Error as ParseError, Parse, ParseStream, Result as ParseResult},
     parse2,
     punctuated::Punctuated,
+    spanned::Spanned,
     token::{Comma as CommaToken, Eq as EqToken},
     visit::{visit_item_enum, Visit},
-    Attribute, Fields, Ident, ItemEnum, Path, Token, Type, Variant,
+    Attribute, Error as SynError, Fields, Ident, ItemEnum, Path, Token, Type, Variant,
 };
 
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
 pub fn derive_enum_from(input: TokenStream) -> TokenStream {
-    let result = from_enum_internal(input.into()).unwrap_or_else(|_err| {
-        panic!("Failed to parse input");
+    let result = from_enum_internal(input.into()).unwrap_or_else(|err| {
+        let errors = err.into_compile_errors();
+        quote! {
+            #(#errors)*
+        }
     });
 
     let mut file = File::create("output.rs").expect("failed to create file");
@@ -181,46 +185,15 @@ impl MatchesIdent for Path {
     }
 }
 
-#[derive(Debug, Default)]
-struct EnumParser {
+#[derive(Debug)]
+struct ParsedEnum {
     src_names: HashSet<Path>,
     effect_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
+    dest: Ident,
 }
 
-impl<'ast> EnumParser {
-    fn parse_from_enum_attr(&mut self, node: &'ast Attribute) {
-        if !node.path.matches_ident("from_enum") {
-            return;
-        }
-
-        if let Ok(from_enum_attr) = parse2::<FromEnumAttr>(node.tokens.clone()) {
-            self.src_names.extend(from_enum_attr.sources);
-            self.effect_name = from_enum_attr.effect;
-        }
-    }
-
-    fn parse_from_case_attrs(&self, attrs: &'ast Vec<Attribute>) -> SrcCasesBySrc {
-        attrs.iter().fold(HashMap::new(), |mut m, attr| {
-            if let Ok(new_attrs) = parse2::<FromCaseAttr>(attr.tokens.clone().into()) {
-                let new_src_cases_by_src = new_attrs.into_src_cases_by_src();
-                let known_srcs = new_src_cases_by_src
-                    .iter()
-                    .all(|(src_enum, _)| match src_enum {
-                        SrcEnum::All() => true,
-                        SrcEnum::Single(ref src_enum) => self.src_names.contains(src_enum),
-                    });
-                if !known_srcs {
-                    panic!("Unknown source enum");
-                }
-
-                m.merge_in(new_src_cases_by_src);
-            }
-
-            m
-        })
-    }
-
+impl ParsedEnum {
     fn conversion_cfgs_by_src_case_by_src(
         &self,
     ) -> HashMap<Path, HashMap<Ident, Vec<ConversionCfg>>> {
@@ -262,6 +235,69 @@ impl<'ast> EnumParser {
     }
 }
 
+#[derive(Debug, Default)]
+struct EnumParser {
+    src_names: HashSet<Path>,
+    effect_name: Option<Path>,
+    src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
+    errors: Vec<Error>,
+}
+
+impl<'ast> EnumParser {
+    fn parse(input: TokenStream2) -> Result<ParsedEnum, Error> {
+        let mut parser = EnumParser::default();
+        let enm: ItemEnum = parse2(input)?;
+        visit_item_enum(&mut parser, &enm);
+        if !parser.errors.is_empty() {
+            Err(parser.errors.into())
+        } else {
+            Ok(ParsedEnum {
+                src_names: parser.src_names,
+                effect_name: parser.effect_name,
+                src_cases_by_src_by_dest: parser.src_cases_by_src_by_dest,
+                dest: enm.ident.clone(),
+            })
+        }
+    }
+
+    fn parse_from_enum_attr(&mut self, node: &'ast Attribute) {
+        if !node.path.matches_ident("from_enum") {
+            return;
+        }
+
+        match parse2::<FromEnumAttr>(node.tokens.clone()) {
+            Ok(from_enum_attr) => {
+                self.src_names.extend(from_enum_attr.sources);
+                self.effect_name = from_enum_attr.effect;
+            }
+            Err(err) => {
+                self.errors.push(err.into());
+            }
+        }
+    }
+
+    fn parse_from_case_attrs(&self, attrs: &'ast Vec<Attribute>) -> SrcCasesBySrc {
+        attrs.iter().fold(HashMap::new(), |mut m, attr| {
+            if let Ok(new_attrs) = parse2::<FromCaseAttr>(attr.tokens.clone().into()) {
+                let new_src_cases_by_src = new_attrs.into_src_cases_by_src();
+                let known_srcs = new_src_cases_by_src
+                    .iter()
+                    .all(|(src_enum, _)| match src_enum {
+                        SrcEnum::All() => true,
+                        SrcEnum::Single(ref src_enum) => self.src_names.contains(src_enum),
+                    });
+                if !known_srcs {
+                    panic!("Unknown source enum");
+                }
+
+                m.merge_in(new_src_cases_by_src);
+            }
+
+            m
+        })
+    }
+}
+
 impl<'ast> Visit<'ast> for EnumParser {
     fn visit_attribute(&mut self, node: &'ast Attribute) {
         self.parse_from_enum_attr(node);
@@ -291,7 +327,7 @@ mod enum_parser_tests {
     use super::*;
 
     #[test]
-    fn parse_from_enum_single_src() -> Result<(), ParseError> {
+    fn parse_from_enum_single_src() -> Result<(), Error> {
         let toks = quote! {
             #[from_enum(Src1)]
             enum Dest {
@@ -299,9 +335,7 @@ mod enum_parser_tests {
                 Case2(),
             }
         };
-        let enm: ItemEnum = parse2(toks.into())?;
-        let mut parser = EnumParser::default();
-        visit_item_enum(&mut parser, &enm);
+        let parser = EnumParser::parse(toks.into())?;
 
         let src_names = &parser.src_names;
         let assert_has_src_name = |src: &str| {
@@ -321,7 +355,7 @@ mod enum_parser_tests {
     }
 
     #[test]
-    fn parse_from_enum_multiple_srcs() -> Result<(), ParseError> {
+    fn parse_from_enum_multiple_srcs() -> Result<(), Error> {
         let toks = quote! {
             #[from_enum(Src1, Src2)]
             enum Dest {
@@ -329,9 +363,7 @@ mod enum_parser_tests {
                 Case2(),
             }
         };
-        let enm: ItemEnum = parse2(toks.into())?;
-        let mut parser = EnumParser::default();
-        visit_item_enum(&mut parser, &enm);
+        let parser = EnumParser::parse(toks.into())?;
 
         let src_names = &parser.src_names;
         let assert_has_src_name = |src: &str| {
@@ -353,7 +385,7 @@ mod enum_parser_tests {
     }
 
     #[test]
-    fn parse_from_enum_srcs_and_effects() -> Result<(), ParseError> {
+    fn parse_from_enum_srcs_and_effects() -> Result<(), Error> {
         let toks = quote! {
             #[from_enum(Src1, effect_type = MyEffect)]
             enum Dest {
@@ -361,9 +393,7 @@ mod enum_parser_tests {
                 Case2(),
             }
         };
-        let enm: ItemEnum = parse2(toks.into())?;
-        let mut parser = EnumParser::default();
-        visit_item_enum(&mut parser, &enm);
+        let parser = EnumParser::parse(toks.into())?;
 
         let src_names = &parser.src_names;
         let assert_has_src_name = |src: &str| {
@@ -382,6 +412,23 @@ mod enum_parser_tests {
             parser.effect_name.unwrap().get_ident().unwrap().to_string(),
             String::from("MyEffect")
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_from_enum_srcs_bad_effect() -> Result<(), Error> {
+        let toks = quote! {
+            #[from_enum(Src1, effect_typeS = MyEffect)]
+            enum Dest {
+                Case1(),
+                Case2(),
+            }
+        };
+        let res = EnumParser::parse(toks.into());
+
+        println!("HERE {:?}", res);
+        assert!(res.is_err());
 
         Ok(())
     }
@@ -465,6 +512,7 @@ struct FromEnumAttr {
 }
 
 impl Parse for FromEnumAttr {
+    // parse a stream like (Src1, Src2, e
     fn parse(input: ParseStream) -> ParseResult<Self> {
         let content;
         parenthesized!(content in input);
@@ -475,6 +523,13 @@ impl Parse for FromEnumAttr {
             let lhs: Path = content.parse()?;
             if content.peek(Token![=]) {
                 content.parse::<EqToken>()?; // skip =
+                if lhs.get_ident().unwrap().to_string() != "effect_type" {
+                    return Err(ParseError::new(
+                        lhs.span(),
+                        "from_enum only accepts source enums and effect_type = YourEffectType",
+                    ));
+                }
+
                 let rhs: Path = content.parse()?;
                 effect.replace(rhs);
             } else {
@@ -491,14 +546,12 @@ impl Parse for FromEnumAttr {
 }
 
 fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
-    let enm: ItemEnum = parse2(input)?;
-    let mut parser = EnumParser::default();
-    visit_item_enum(&mut parser, &enm);
+    let parser = EnumParser::parse(input)?;
     if parser.src_names.is_empty() {
         panic!("#[from_enum(Src)] must appear at least once to specify the source enum");
     }
 
-    let dest = &enm.ident;
+    let dest = &parser.dest;
     let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
 
     let impls =
@@ -563,12 +616,56 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
 
 #[derive(Debug, Clone)]
 enum Error {
-    ParseError(ParseError),
+    SynError(SynError),
+    CompoundError(Vec<Error>),
 }
 
-impl From<ParseError> for Error {
-    fn from(parse_error: ParseError) -> Error {
-        Error::ParseError(parse_error)
+impl Error {
+    pub fn to_compile_errors(&self) -> Vec<TokenStream2> {
+        match self {
+            Self::SynError(x) => vec![x.to_compile_error()],
+            Self::CompoundError(x) => x
+                .iter()
+                .flat_map(|e| match e {
+                    Self::SynError(s) => vec![s.to_compile_error()],
+                    Self::CompoundError(_) => e.to_compile_errors(),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn into_compile_errors(self) -> Vec<TokenStream2> {
+        match self {
+            Self::SynError(x) => vec![x.into_compile_error()],
+            Self::CompoundError(x) => x
+                .into_iter()
+                .flat_map(|e| match e {
+                    Self::SynError(s) => vec![s.into_compile_error()],
+                    Self::CompoundError(_) => e.into_compile_errors(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SynError(x) => x.source(),
+            Self::CompoundError(x) => x.first().and_then(std::error::Error::source),
+        }
+    }
+}
+
+impl From<SynError> for Error {
+    fn from(syn_error: SynError) -> Error {
+        Error::SynError(syn_error)
+    }
+}
+
+impl From<Vec<Error>> for Error {
+    fn from(errors: Vec<Error>) -> Error {
+        Error::CompoundError(errors)
     }
 }
 
