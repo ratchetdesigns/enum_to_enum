@@ -27,7 +27,7 @@ pub fn derive_enum_from(input: TokenStream) -> TokenStream {
         }
     });
 
-    let mut file = File::create("output.rs").expect("failed to create file");
+    let mut file = File::create(name).expect("failed to create file");
     std::io::Write::write_all(&mut file, result.to_string().as_bytes()).expect("failed to write");
 
     result.into()
@@ -40,30 +40,27 @@ struct ConversionCfg {
 }
 
 impl ConversionCfg {
-    fn to_args<T: Fn(&Ident, &Type) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
+    fn each_arg<F: Fn(&Ident, &Type) -> TokenStream2>(&self, xform: F) -> Vec<TokenStream2> {
         match &self.dest.fields {
-            Fields::Unit => quote! {},
-            Fields::Named(named) => {
-                let args = named
-                    .named
-                    .iter()
-                    .map(|field| xform(field.ident.as_ref().unwrap(), &field.ty));
+            Fields::Unit => vec![],
+            Fields::Named(named) => named
+                .named
+                .iter()
+                .map(|field| xform(field.ident.as_ref().unwrap(), &field.ty))
+                .collect(),
+            Fields::Unnamed(unnamed) => unnamed
+                .unnamed
+                .iter()
+                .enumerate()
+                .map(|(i, field)| xform(&format_ident!("arg{}", i), &field.ty))
+                .collect(),
+        }
+    }
 
-                quote! {
-                    #(#args),*
-                }
-            }
-            Fields::Unnamed(unnamed) => {
-                let args = unnamed
-                    .unnamed
-                    .iter()
-                    .enumerate()
-                    .map(|(i, field)| xform(&format_ident!("arg{}", i), &field.ty));
-
-                quote! {
-                    #(#args),*
-                }
-            }
+    fn to_args<T: Fn(&Ident, &Type) -> TokenStream2>(&self, xform: T) -> TokenStream2 {
+        let args = self.each_arg(xform);
+        quote! {
+            #(#args),*
         }
     }
 
@@ -85,13 +82,14 @@ impl ConversionCfg {
         }
     }
 
-    fn to_case_match(&self, dest: &Ident, use_try_from: bool) -> TokenStream2 {
+    fn to_case_match(&self, dest: &Ident, use_try_from: bool, has_effect: bool) -> TokenStream2 {
         let dest_case = &self.dest.ident;
         let fields = &self.dest.fields;
-        let try_type = if use_try_from {
-            quote! {}
+
+        let field_suffix = if has_effect {
+            quote! { .value }
         } else {
-            quote! { .into() }
+            quote! {}
         };
 
         match (fields, use_try_from) {
@@ -106,7 +104,7 @@ impl ConversionCfg {
             (Fields::Named(_), _) => {
                 let args = self.to_wrapped_args(|id| {
                     quote! {
-                        #id: #id#try_type
+                        #id: #id#field_suffix
                     }
                 });
 
@@ -117,7 +115,7 @@ impl ConversionCfg {
             (Fields::Unnamed(_), _) => {
                 let args = self.to_wrapped_args(|id| {
                     quote! {
-                        #id#try_type
+                        #id#field_suffix
                     }
                 });
 
@@ -188,7 +186,7 @@ impl MatchesIdent for Path {
 #[derive(Debug)]
 struct ParsedEnum {
     src_names: HashSet<Path>,
-    effect_name: Option<Path>,
+    effect_holder_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
     dest: Ident,
 }
@@ -238,7 +236,7 @@ impl ParsedEnum {
 #[derive(Debug, Default)]
 struct EnumParser {
     src_names: HashSet<Path>,
-    effect_name: Option<Path>,
+    effect_holder_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
     errors: Vec<Error>,
 }
@@ -253,17 +251,17 @@ impl<'ast> EnumParser {
             return Err(ParseError::new(
                 enm.span(),
                 "#[from_enum(Src)] must appear at least once to specify the source enum(s)",
-            ).into());
-            
+            )
+            .into());
         }
 
         if !parser.errors.is_empty() {
-            return Err(parser.errors.into())
+            return Err(parser.errors.into());
         }
 
         Ok(ParsedEnum {
             src_names: parser.src_names,
-            effect_name: parser.effect_name,
+            effect_holder_name: parser.effect_holder_name,
             src_cases_by_src_by_dest: parser.src_cases_by_src_by_dest,
             dest: enm.ident.clone(),
         })
@@ -277,7 +275,7 @@ impl<'ast> EnumParser {
         match parse2::<FromEnumAttr>(node.tokens.clone()) {
             Ok(from_enum_attr) => {
                 self.src_names.extend(from_enum_attr.sources);
-                self.effect_name = from_enum_attr.effect;
+                self.effect_holder_name = from_enum_attr.effect;
             }
             Err(err) => {
                 self.errors.push(err.into());
@@ -358,7 +356,7 @@ mod enum_parser_tests {
         };
 
         assert_has_src_name("Src1");
-        assert_eq!(parser.effect_name, None);
+        assert_eq!(parser.effect_holder_name, None);
 
         Ok(())
     }
@@ -388,7 +386,7 @@ mod enum_parser_tests {
         assert_has_src_name("Src1");
         assert_has_src_name("Src2");
 
-        assert_eq!(parser.effect_name, None);
+        assert_eq!(parser.effect_holder_name, None);
 
         Ok(())
     }
@@ -396,7 +394,7 @@ mod enum_parser_tests {
     #[test]
     fn parse_from_enum_srcs_and_effects() -> Result<(), Error> {
         let toks = quote! {
-            #[from_enum(Src1, effect_type = MyEffect)]
+            #[from_enum(Src1, effect_container = MyEffect)]
             enum Dest {
                 Case1(),
                 Case2(),
@@ -418,7 +416,12 @@ mod enum_parser_tests {
         assert_has_src_name("Src1");
 
         assert_eq!(
-            parser.effect_name.unwrap().get_ident().unwrap().to_string(),
+            parser
+                .effect_holder_name
+                .unwrap()
+                .get_ident()
+                .unwrap()
+                .to_string(),
             String::from("MyEffect")
         );
 
@@ -443,7 +446,7 @@ mod enum_parser_tests {
     #[test]
     fn parse_from_enum_srcs_bad_effect() -> Result<(), Error> {
         let toks = quote! {
-            #[from_enum(Src1, effect_typeS = MyEffect)]
+            #[from_enum(Src1, effect_containerS = MyEffect)]
             enum Dest {
                 Case1(),
                 Case2(),
@@ -546,10 +549,10 @@ impl Parse for FromEnumAttr {
             let lhs: Path = content.parse()?;
             if content.peek(Token![=]) {
                 content.parse::<EqToken>()?; // skip =
-                if lhs.get_ident().unwrap().to_string() != "effect_type" {
+                if lhs.get_ident().unwrap().to_string() != "effect_container" {
                     return Err(ParseError::new(
                         lhs.span(),
-                        "from_enum only accepts source enums and effect_type = YourEffectType",
+                        "from_enum only accepts source enums and effect_container = YourEffectContainerImplementingWithEffects",
                     ));
                 }
 
@@ -572,7 +575,18 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
     let parser = EnumParser::parse(input)?;
 
     let dest = &parser.dest;
+    let effect_holder_name = &parser.effect_holder_name.as_ref();
+    let has_effect = effect_holder_name.is_some();
     let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
+    let result_wrapper = |res: Ident| {
+        effect_holder_name
+            .map(|n| {
+                quote! {
+                    #n::new(#res, vec![])
+                }
+            })
+            .unwrap_or_else(|| quote! { #res })
+    };
 
     let impls =
         conversion_cfgs_by_src_case_by_src
@@ -582,18 +596,21 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                     .iter()
                     .map(|(case, conversion_cfgs)| {
                         let use_try_from = conversion_cfgs.len() > 1;
-                        let conversions = conversion_cfgs
-                            .iter()
-                            .map(|conversion_cfg| conversion_cfg.to_case_match(dest, use_try_from));
+                        let conversions = conversion_cfgs.iter().map(|conversion_cfg| {
+                            conversion_cfg.to_case_match(dest, use_try_from, has_effect)
+                        });
                         let example_conversion_cfg = conversion_cfgs.first().unwrap();
+
                         let match_result = if use_try_from {
                             let lhs = example_conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
                             let rhs =
                                 example_conversion_cfg.to_args(|arg, _| quote! { #arg.try_into() });
+                            let res = result_wrapper(format_ident!("value"));
                             let conversions = conversions.map(|c| {
                                 quote! {
                                     if let (#lhs) = (#rhs) {
-                                        return #c;
+                                        let value = #c;
+                                        return #res;
                                     }
                                 }
                             });
@@ -603,6 +620,26 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                                 unreachable!();
                             }
                         } else {
+                            let lets = example_conversion_cfg.each_arg(|arg, ty| {
+                                let full_type = effect_holder_name
+                                    .map(|n| {
+                                        quote! { #n<#ty> }
+                                    })
+                                    .unwrap_or_else(|| quote! { #ty });
+
+                                quote! {
+                                    let #arg: #full_type = #arg.into();
+                                }
+                            });
+                            let res = result_wrapper(format_ident!("value"));
+                            let conversions = conversions.map(|c| {
+                                quote! {
+                                    #(#lets)*
+                                    let value = #c;
+                                    #res
+                                }
+                            });
+
                             quote! { #(#conversions)* }
                         };
 
@@ -614,6 +651,9 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                             }
                         }
                     });
+                let dest = effect_holder_name
+                    .map(|effect_holder| quote! { #effect_holder<#dest> })
+                    .unwrap_or_else(|| quote! { #dest });
 
                 quote! {
                     impl std::convert::From<#src_name> for #dest {

@@ -1,5 +1,5 @@
 use std::convert::From;
-use enum_to_enum::FromEnum;
+use enum_to_enum::{FromEnum, WithEffects};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Src {
@@ -55,12 +55,13 @@ enum FallibleDest {
     C3(u8),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum MyEffect {
     Log(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
-#[from_enum(Src, effect_type = MyEffect)]
+#[from_enum(Src, effect_container = EffectHolder)]
 enum EffectDest {
     Case1(String),
 
@@ -68,6 +69,37 @@ enum EffectDest {
     MyCase2(),
 
     Case3 { a: String },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct EffectHolder<Value> {
+    value: Value,
+    effects: Vec<MyEffect>,
+}
+
+impl From<String> for EffectHolder<String> {
+    fn from(s: String) -> EffectHolder<String> {
+        EffectHolder {
+            value: s,
+            effects: vec![],
+        }
+    }
+}
+
+impl<Value> WithEffects for EffectHolder<Value> {
+    type Value = Value;
+    type Effect = MyEffect;
+
+    fn new(value: Self::Value, effects: Vec<Self::Effect>) -> Self {
+        Self {
+            value,
+            effects,
+        }
+    }
+
+    fn effects(&self) -> &[Self::Effect] {
+        &self.effects
+    }
 }
 
 fn main() {
@@ -86,5 +118,12 @@ fn main() {
     assert_eq!(
         FallibleDest::from(FallibleSrc::C1(300u16)),
         FallibleDest::C2(300u16),
+    );
+    assert_eq!(
+        EffectHolder::<EffectDest>::from(Src::Case1("hi".to_string())),
+        EffectHolder {
+            value: EffectDest::Case1("hi".to_string()),
+            effects: vec![],
+        },
     );
 }
