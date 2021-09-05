@@ -32,6 +32,136 @@ use std::fs::File;
 /// `SourceEnum1Case` of `source_enum_1` to the annotated case and from `DefaultCase` of all other source
 /// enums to the annotated case.
 /// - Without any `from_case` annotation, the we default to converting from same-named variants.
+///
+/// # Examples
+///
+/// ## 1-to-1 conversion
+/// 1-to-1 conversion from source to destination enum variants, demonstrating recursive, field-level
+/// conversions and from_case usage.
+///
+/// ```
+/// # #[macro_use] extern crate enum_to_enum_derive;
+/// # fn main () {
+/// use enum_to_enum::FromEnum;
+///
+/// #[derive(Debug)]
+/// enum Src {
+///     Case1(),
+///     Case2(SrcStrField),
+///     Case3 { a: SrcStrField, b: u8 },
+/// }
+///
+/// #[derive(FromEnum, Debug, PartialEq, Eq)]
+/// #[from_enum(Src)]
+/// enum Dest {
+///     Case1(),
+///
+///     #[from_case(Case2)]
+///     DestCase2(DestStrField),
+///
+///     #[from_case(Src = Case3)]
+///     DestCase3 { a: DestStrField, b: u8 },
+/// }
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// struct SrcStrField(String);
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// struct DestStrField(String);
+///
+/// impl From<SrcStrField> for DestStrField {
+///     fn from(src: SrcStrField) -> DestStrField {
+///         DestStrField(src.0 + " world")
+///     }
+/// }
+///
+/// assert_eq!(
+///     Dest::from(Src::Case1()),
+///     Dest::Case1(),
+/// );
+///
+/// assert_eq!(
+///     Dest::from(Src::Case2(SrcStrField(String::from("hello")))),
+///     Dest::DestCase2(DestStrField(String::from("hello world"))),
+/// );
+///
+/// assert_eq!(
+///     Dest::from(Src::Case3 {
+///         a: SrcStrField(String::from("hello")),
+///         b: 100u8,
+///     }),
+///     Dest::DestCase3 {
+///         a: DestStrField(String::from("hello world")),
+///         b: 100u8,
+///     },
+/// );
+/// # }
+/// ```
+///
+/// ## Many-to-1 conversion
+/// Many-to-1 conversion, demonstrating mapping from many source variants to a single destination
+/// variant, using whichever source variant's try_into succeeds.
+///
+/// ```
+/// # #[macro_use] extern crate enum_to_enum_derive;
+/// # fn main () {
+/// use enum_to_enum::FromEnum;
+/// use std::convert::TryFrom;
+///
+/// #[derive(Debug)]
+/// enum Src {
+///     Case1(SrcField),
+///     Case2(SrcField),
+/// }
+///
+/// #[derive(FromEnum, Debug, PartialEq, Eq)]
+/// #[from_enum(Src)]
+/// enum Dest {
+///     #[from_case(Case1, Case2)]
+///     Big(BigDestField),
+///
+///     #[from_case(Case1, Case2)]
+///     Small(SmallDestField),
+/// }
+///
+/// #[derive(Debug, PartialEq, Eq, Clone)]
+/// struct SrcField(u32);
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// struct BigDestField(u32);
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// struct SmallDestField(u32);
+///
+/// impl TryFrom<SrcField> for SmallDestField {
+///     type Error = &'static str;
+///     fn try_from(src: SrcField) -> Result<SmallDestField, Self::Error> {
+///         if src.0 < 100 {
+///             Ok(SmallDestField(src.0 - 1))
+///         } else {
+///             Err("too big")
+///         }
+///     }
+/// }
+///
+/// impl TryFrom<SrcField> for BigDestField {
+///     type Error = &'static str;
+///     fn try_from(src: SrcField) -> Result<BigDestField, Self::Error> {
+///         if src.0 >= 100 {
+///             Ok(BigDestField(src.0 + 1))
+///         } else {
+///             Err("too small")
+///         }
+///     }
+/// }
+///
+/// assert_eq!(
+///     Dest::from(Src::Case1(SrcField(10))),
+///     Dest::Small(SmallDestField(9)),
+/// );
+///
+/// # }
+/// ```
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
 pub fn derive_enum_from(input: TokenStream) -> TokenStream {
     let result = from_enum_internal(input.into()).unwrap_or_else(|err| {
@@ -108,7 +238,7 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                                     .unwrap_or_else(|| quote! { #ty });
 
                                 quote! {
-                                    let #arg_res: std::result::Result<#typ, _> = #arg.try_into();
+                                    let #arg_res: std::result::Result<#typ, _> = #arg.clone().try_into();
                                 }
                             });
                                 let lhs = conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
