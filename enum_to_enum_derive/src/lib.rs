@@ -640,18 +640,20 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
             .unwrap_or_else(|| quote! { #ret #case_match})
         };
 
-    let impls = conversion_cfgs_by_src_case_by_src.iter().map(
-        |(src_name, conversion_cfgs_by_src_case)| {
-            let cases = conversion_cfgs_by_src_case
-                .iter()
-                .map(|(case, conversion_cfgs)| {
-                    let use_try_from = conversion_cfgs.len() > 1;
-                    let conversions = conversion_cfgs.iter().map(|conversion_cfg| {
-                        let case_match =
-                            conversion_cfg.to_case_match(dest, use_try_from, has_effect);
+    let impls =
+        conversion_cfgs_by_src_case_by_src
+            .iter()
+            .map(|(src_name, conversion_cfgs_by_src_case)| {
+                let cases = conversion_cfgs_by_src_case
+                    .iter()
+                    .map(|(case, conversion_cfgs)| {
+                        let use_try_from = conversion_cfgs.len() > 1;
+                        let conversions = conversion_cfgs.iter().map(|conversion_cfg| {
+                            let case_match =
+                                conversion_cfg.to_case_match(dest, use_try_from, has_effect);
 
-                        if use_try_from {
-                            let arg_let = conversion_cfg.each_arg(|arg, ty| {
+                            if use_try_from {
+                                let arg_let = conversion_cfg.each_arg(|arg, ty| {
                                 let arg_res = format_ident!("{}_res", &arg);
                                 let typ = effect_holder_name
                                     .map(|n| {
@@ -663,75 +665,74 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                                     let #arg_res: std::result::Result<#typ, _> = #arg.try_into();
                                 }
                             });
-                            let lhs = conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
-                            let rhs = conversion_cfg.to_args(|arg, _| {
-                                let arg_res = format_ident!("{}_res", &arg);
-                                quote! { #arg_res }
-                            });
-                            let res = result_wrapper(case_match, conversion_cfg, true);
-
-                            quote! {
-                                #(#arg_let)*
-                                if let (#lhs) = (#rhs) {
-                                    #res;
-                                }
-                            }
-                        } else {
-                            let lets = conversion_cfg.each_arg(|arg, ty| {
-                                let full_type = effect_holder_name
-                                    .map(|n| {
-                                        quote! { #n<#ty> }
-                                    })
-                                    .unwrap_or_else(|| quote! { #ty });
+                                let lhs = conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
+                                let rhs = conversion_cfg.to_args(|arg, _| {
+                                    let arg_res = format_ident!("{}_res", &arg);
+                                    quote! { #arg_res }
+                                });
+                                let res = result_wrapper(case_match, conversion_cfg, true);
 
                                 quote! {
-                                    let #arg: #full_type = #arg.into();
+                                    #(#arg_let)*
+                                    if let (#lhs) = (#rhs) {
+                                        #res;
+                                    }
                                 }
-                            });
-                            let res = result_wrapper(case_match, conversion_cfg, false);
+                            } else {
+                                let lets = conversion_cfg.each_arg(|arg, ty| {
+                                    let full_type = effect_holder_name
+                                        .map(|n| {
+                                            quote! { #n<#ty> }
+                                        })
+                                        .unwrap_or_else(|| quote! { #ty });
+
+                                    quote! {
+                                        let #arg: #full_type = #arg.into();
+                                    }
+                                });
+                                let res = result_wrapper(case_match, conversion_cfg, false);
+                                quote! {
+                                    #(#lets)*
+                                    #res
+                                }
+                            }
+                        });
+
+                        let example_conversion_cfg = conversion_cfgs.first().unwrap();
+
+                        let args = example_conversion_cfg.to_wrapped_args(|arg| quote! { #arg });
+                        let trailer = if use_try_from {
                             quote! {
-                                #(#lets)*
-                                #res
+                                unreachable!();
+                            }
+                        } else {
+                            quote! {}
+                        };
+
+                        quote! {
+                            #src_name::#case #args => {
+                                #(#conversions)*
+                                #trailer
                             }
                         }
                     });
+                let dest = effect_holder_name
+                    .map(|effect_holder| quote! { #effect_holder<#dest> })
+                    .unwrap_or_else(|| quote! { #dest });
 
-                    let example_conversion_cfg = conversion_cfgs.first().unwrap();
+                quote! {
+                    impl std::convert::From<#src_name> for #dest {
+                        fn from(src: #src_name) -> #dest {
+                            use std::convert::Into;
+                            use std::convert::TryInto;
 
-                    let args = example_conversion_cfg.to_wrapped_args(|arg| quote! { #arg });
-                    let trailer = if use_try_from {
-                        quote! {
-                            unreachable!();
-                        }
-                    } else {
-                        quote! {}
-                    };
-
-                    quote! {
-                        #src_name::#case #args => {
-                            #(#conversions)*
-                            #trailer
-                        }
-                    }
-                });
-            let dest = effect_holder_name
-                .map(|effect_holder| quote! { #effect_holder<#dest> })
-                .unwrap_or_else(|| quote! { #dest });
-
-            quote! {
-                impl std::convert::From<#src_name> for #dest {
-                    fn from(src: #src_name) -> #dest {
-                        use std::convert::Into;
-                        use std::convert::TryInto;
-
-                        match src {
-                            #(#cases),*
+                            match src {
+                                #(#cases),*
+                            }
                         }
                     }
                 }
-            }
-        },
-    );
+            });
 
     Ok(quote! {
         #(#impls)*
