@@ -14,6 +14,24 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use std::fs::File;
 
+/// You can add `#[derive(FromEnum)]` to any enum to generate a possibly effectful [`From`]
+/// implementation to convert from other source enums to the annotated destination enum.
+///
+/// # `from_enum`
+/// - You **must** annotate the destination enum with `#[from_enum(SrcEnum1, SrcEnum2, ...)]`.
+/// - You *may* include `effect_container = YourEffectContainer`, like this:
+/// `#[from_enum(SrcEnum1, effect_container = YourEffectContainer)]`. If `effect_container` is
+/// specified, the conversion will be `From<SrcEnum1> for YourEffectContainer<Value = DestEnum>`.
+/// `YourEffectContainer` **must** implement `enum_to_enum::WithEffects`.
+/// If `effect_container` is not specified, the conversion will be `From<SrcEnum1> for DestEnum`.
+///
+/// # `from_case`
+/// - You *may* also annotate any variant of the destination enum with `#[from_case(SomeCase)]` to
+/// convert from `SomeCase` on all source enums to the annotated variant.
+/// - You *may* annotate `#[from_case(DefaultCase, source_enum_1 = SourceEnum1Case)]` to convert from
+/// `SourceEnum1Case` of `source_enum_1` to the annotated case and from `DefaultCase` of all other source
+/// enums to the annotated case.
+/// - Without any `from_case` annotation, the we default to converting from same-named variants.
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
 pub fn derive_enum_from(input: TokenStream) -> TokenStream {
     let result = from_enum_internal(input.into()).unwrap_or_else(|err| {
