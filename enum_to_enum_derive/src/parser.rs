@@ -135,9 +135,9 @@ impl<'ast> EnumParser {
         }
     }
 
-    fn parse_from_case_attrs(&self, attrs: &'ast Vec<Attribute>) -> SrcCasesBySrc {
+    fn parse_from_case_attrs(&self, attrs: &[Attribute]) -> SrcCasesBySrc {
         attrs.iter().fold(HashMap::new(), |mut m, attr| {
-            if let Ok(new_attrs) = parse2::<FromCaseAttr>(attr.tokens.clone().into()) {
+            if let Ok(new_attrs) = parse2::<FromCaseAttr>(attr.tokens.clone()) {
                 let new_src_cases_by_src = new_attrs.into_src_cases_by_src();
                 let known_srcs = new_src_cases_by_src
                     .iter()
@@ -404,7 +404,7 @@ impl Parse for FromEnumAttr {
             let lhs: Path = content.parse()?;
             if content.peek(Token![=]) {
                 content.parse::<EqToken>()?; // skip =
-                if lhs.get_ident().unwrap().to_string() != "effect_container" {
+                if *lhs.get_ident().unwrap() != "effect_container" {
                     return Err(ParseError::new(
                         lhs.span(),
                         "from_enum only accepts source enums and effect_container = YourEffectContainerImplementingWithEffects",
