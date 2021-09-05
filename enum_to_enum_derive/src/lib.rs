@@ -27,7 +27,7 @@ pub fn derive_enum_from(input: TokenStream) -> TokenStream {
         }
     });
 
-    let mut file = File::create(name).expect("failed to create file");
+    let mut file = File::create("output.rs").expect("failed to create file");
     std::io::Write::write_all(&mut file, result.to_string().as_bytes()).expect("failed to write");
 
     result.into()
@@ -597,57 +597,72 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                     .map(|(case, conversion_cfgs)| {
                         let use_try_from = conversion_cfgs.len() > 1;
                         let conversions = conversion_cfgs.iter().map(|conversion_cfg| {
-                            conversion_cfg.to_case_match(dest, use_try_from, has_effect)
-                        });
-                        let example_conversion_cfg = conversion_cfgs.first().unwrap();
+                            let case_match = conversion_cfg.to_case_match(dest, use_try_from, has_effect);
 
-                        let match_result = if use_try_from {
-                            let lhs = example_conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
-                            let rhs =
-                                example_conversion_cfg.to_args(|arg, _| quote! { #arg.try_into() });
-                            let res = result_wrapper(format_ident!("value"));
-                            let conversions = conversions.map(|c| {
+                            if use_try_from {
+                                let arg_let = conversion_cfg.each_arg(|arg, ty| {
+                                    let arg_res = format_ident!("{}_res", &arg);
+                                    let typ = effect_holder_name
+                                        .map(|n| {
+                                            quote! { #n<#ty> }
+                                        })
+                                        .unwrap_or_else(|| quote! { #ty });
+
+                                    quote! {
+                                        let #arg_res: std::result::Result<#typ, _> = #arg.try_into();
+                                    }
+                                });
+                                let lhs = conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
+                                let rhs =
+                                    conversion_cfg.to_args(|arg, _| {
+                                        let arg_res = format_ident!("{}_res", &arg);
+                                        quote! { #arg_res }
+                                    });
+                                let res = result_wrapper(format_ident!("value"));
+
                                 quote! {
+                                    #(#arg_let)*
                                     if let (#lhs) = (#rhs) {
-                                        let value = #c;
+                                        let value = #case_match;
                                         return #res;
                                     }
                                 }
-                            });
+                            } else {
+                                let lets = conversion_cfg.each_arg(|arg, ty| {
+                                    let full_type = effect_holder_name
+                                        .map(|n| {
+                                            quote! { #n<#ty> }
+                                        })
+                                        .unwrap_or_else(|| quote! { #ty });
 
+                                    quote! {
+                                        let #arg: #full_type = #arg.into();
+                                    }
+                                });
+                                let res = result_wrapper(format_ident!("value"));
+                                quote! {
+                                    #(#lets)*
+                                    let value = #case_match;
+                                    #res
+                                }
+                            }
+                        });
+
+                        let example_conversion_cfg = conversion_cfgs.first().unwrap();
+
+                        let args = example_conversion_cfg.to_wrapped_args(|arg| quote! { #arg });
+                        let trailer = if use_try_from {
                             quote! {
-                                #(#conversions)*
                                 unreachable!();
                             }
                         } else {
-                            let lets = example_conversion_cfg.each_arg(|arg, ty| {
-                                let full_type = effect_holder_name
-                                    .map(|n| {
-                                        quote! { #n<#ty> }
-                                    })
-                                    .unwrap_or_else(|| quote! { #ty });
-
-                                quote! {
-                                    let #arg: #full_type = #arg.into();
-                                }
-                            });
-                            let res = result_wrapper(format_ident!("value"));
-                            let conversions = conversions.map(|c| {
-                                quote! {
-                                    #(#lets)*
-                                    let value = #c;
-                                    #res
-                                }
-                            });
-
-                            quote! { #(#conversions)* }
+                            quote! {}
                         };
-
-                        let args = example_conversion_cfg.to_wrapped_args(|arg| quote! { #arg });
 
                         quote! {
                             #src_name::#case #args => {
-                                #match_result
+                                #(#conversions)*
+                                #trailer
                             }
                         }
                     });

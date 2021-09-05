@@ -1,4 +1,4 @@
-use std::convert::From;
+use std::convert::{From, TryFrom};
 use enum_to_enum::{FromEnum, WithEffects};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +102,47 @@ impl<Value> WithEffects for EffectHolder<Value> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
+#[from_enum(FallibleSrc, effect_container = EffectHolder)]
+enum FallibleEffectDest {
+    #[from_case(C1)]
+    C1(u8),
+    #[from_case(C1, C2)]
+    C2(u16),
+    #[from_case(C2)]
+    C3(u8),
+}
+
+impl TryFrom<u16> for EffectHolder<u8> {
+    type Error = &'static str;
+
+    fn try_from(u: u16) -> Result<EffectHolder<u8>, Self::Error> {
+        if u <= u8::MAX.into() {
+            Ok(EffectHolder {
+                value: u as u8,
+                effects: vec![],
+            })
+        } else {
+            Err("No good")
+        }
+    }
+}
+
+impl TryFrom<u16> for EffectHolder<u16> {
+    type Error = &'static str;
+
+    fn try_from(u: u16) -> Result<EffectHolder<u16>, Self::Error> {
+        if u <= u8::MAX.into() {
+            Err("No good")
+        } else {
+            Ok(EffectHolder {
+                value: u,
+                effects: vec![],
+            })
+        }
+    }
+}
+
 fn main() {
     assert_eq!(
         SimpleDest::from(Src::Case1("hi".to_string())),
@@ -123,6 +164,13 @@ fn main() {
         EffectHolder::<EffectDest>::from(Src::Case1("hi".to_string())),
         EffectHolder {
             value: EffectDest::Case1("hi".to_string()),
+            effects: vec![],
+        },
+    );
+    assert_eq!(
+        EffectHolder::<FallibleEffectDest>::from(FallibleSrc::C1(100u16)),
+        EffectHolder {
+            value: FallibleEffectDest::C1(100u8),
             effects: vec![],
         },
     );
