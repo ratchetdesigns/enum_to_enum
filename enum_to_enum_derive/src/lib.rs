@@ -271,7 +271,7 @@ impl<'ast> EnumParser {
             src_names: parser.src_names,
             effect_holder_name: parser.effect_holder_name,
             src_cases_by_src_by_dest: parser.src_cases_by_src_by_dest,
-            dest: enm.ident.clone(),
+            dest: enm.ident,
         })
     }
 
