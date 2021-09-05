@@ -1,9 +1,13 @@
 extern crate proc_macro;
 
+mod merge_in;
+
+use merge_in::MergeIn;
+
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::convert::From;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::fs::File;
@@ -154,29 +158,6 @@ struct CaseCfg {
     dest_case: Ident,
 
     src_cases_by_src: SrcCasesBySrc,
-}
-
-trait MergeIn {
-    fn merge_in(&mut self, other: Self);
-}
-
-impl<K: Eq + std::hash::Hash, Vs: MergeIn> MergeIn for HashMap<K, Vs> {
-    fn merge_in(&mut self, other: Self) {
-        other.into_iter().for_each(|(k, vs)| match self.entry(k) {
-            Entry::Occupied(mut occ) => {
-                occ.get_mut().merge_in(vs);
-            }
-            Entry::Vacant(vac) => {
-                vac.insert(vs);
-            }
-        });
-    }
-}
-
-impl<T> MergeIn for Vec<T> {
-    fn merge_in(&mut self, other: Self) {
-        self.extend(other);
-    }
 }
 
 trait MatchesIdent {
