@@ -196,6 +196,7 @@ struct ParsedEnum {
     src_names: HashSet<Path>,
     effect_holder_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
+    dest_case_order: Vec<Variant>,
     dest: Ident,
 }
 
@@ -246,6 +247,7 @@ struct EnumParser {
     src_names: HashSet<Path>,
     effect_holder_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
+    dest_case_order: Vec<Variant>,
     errors: Vec<Error>,
 }
 
@@ -272,6 +274,7 @@ impl<'ast> EnumParser {
             effect_holder_name: parser.effect_holder_name,
             src_cases_by_src_by_dest: parser.src_cases_by_src_by_dest,
             dest: enm.ident,
+            dest_case_order: parser.dest_case_order,
         })
     }
 
@@ -319,6 +322,7 @@ impl<'ast> Visit<'ast> for EnumParser {
     }
 
     fn visit_variant(&mut self, node: &'ast Variant) {
+        self.dest_case_order.push(node.clone());
         let mut src_cases_by_src = self.parse_from_case_attrs(&node.attrs);
         if src_cases_by_src.is_empty() {
             src_cases_by_src.insert(
