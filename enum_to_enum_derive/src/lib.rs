@@ -196,7 +196,7 @@ struct ParsedEnum {
     src_names: HashSet<Path>,
     effect_holder_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
-    dest_case_order: Vec<Variant>,
+    dest_case_order: HashMap<Variant, usize>,
     dest: Ident,
 }
 
@@ -206,7 +206,7 @@ impl ParsedEnum {
     ) -> HashMap<Path, HashMap<Ident, Vec<ConversionCfg>>> {
         let src_names = &self.src_names;
 
-        self.src_cases_by_src_by_dest.iter().fold(
+        let conversion_cfgs_by_src_case_by_src = self.src_cases_by_src_by_dest.iter().fold(
             HashMap::new(),
             |mut conversion_cfgs_by_src_case_by_src, (dest, src_cases_by_src)| {
                 src_cases_by_src.iter().for_each(|(src, src_cases)| {
@@ -238,7 +238,24 @@ impl ParsedEnum {
                 });
                 conversion_cfgs_by_src_case_by_src
             },
-        )
+        );
+        conversion_cfgs_by_src_case_by_src
+            .into_iter()
+            .map(|(src, conversion_cfgs_by_src_case)| {
+                (
+                    src,
+                    conversion_cfgs_by_src_case
+                        .into_iter()
+                        .map(|(src_case, mut conversion_cfgs)| {
+                            conversion_cfgs.sort_by_key(|cfg| {
+                                self.dest_case_order.get(&cfg.dest).unwrap_or(&0)
+                            });
+                            (src_case, conversion_cfgs)
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -247,7 +264,7 @@ struct EnumParser {
     src_names: HashSet<Path>,
     effect_holder_name: Option<Path>,
     src_cases_by_src_by_dest: HashMap<Variant, SrcCasesBySrc>,
-    dest_case_order: Vec<Variant>,
+    dest_case_order: HashMap<Variant, usize>,
     errors: Vec<Error>,
 }
 
@@ -322,7 +339,8 @@ impl<'ast> Visit<'ast> for EnumParser {
     }
 
     fn visit_variant(&mut self, node: &'ast Variant) {
-        self.dest_case_order.push(node.clone());
+        self.dest_case_order
+            .insert(node.clone(), self.dest_case_order.len());
         let mut src_cases_by_src = self.parse_from_case_attrs(&node.attrs);
         if src_cases_by_src.is_empty() {
             src_cases_by_src.insert(
@@ -583,7 +601,6 @@ impl Parse for FromEnumAttr {
     }
 }
 
-// TODO: check cases in the order they are referenced in dest
 fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
     let parser = EnumParser::parse(input)?;
 
