@@ -13,7 +13,7 @@ where
 
     fn new(value: Self::Value, effects: Vec<Self::Effect>) -> Self;
 
-    fn effects(&self) -> &[Self::Effect];
+    fn into_value_and_effects(self) -> (Self::Value, Box<dyn Iterator<Item = Self::Effect>>);
 
     fn compose_from(value: Self::Value, composed_effects: Box<[Self::Effect]>) -> Self {
         let effects = composed_effects.into();

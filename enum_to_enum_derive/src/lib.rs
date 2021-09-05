@@ -86,12 +86,6 @@ impl ConversionCfg {
         let dest_case = &self.dest.ident;
         let fields = &self.dest.fields;
 
-        let field_suffix = if has_effect {
-            quote! { .value }
-        } else {
-            quote! {}
-        };
-
         match (fields, use_try_from) {
             (Fields::Unit, true) => {
                 panic!("multiple source options found for a single destination and the source does not have a field to try_from");
@@ -103,8 +97,15 @@ impl ConversionCfg {
             }
             (Fields::Named(_), _) => {
                 let args = self.to_wrapped_args(|id| {
-                    quote! {
-                        #id: #id#field_suffix
+                    if has_effect {
+                        let id_val = format_ident!("{}_value", id);
+                        quote! {
+                            #id: #id_val
+                        }
+                    } else {
+                        quote! {
+                            #id
+                        }
                     }
                 });
 
@@ -114,8 +115,15 @@ impl ConversionCfg {
             }
             (Fields::Unnamed(_), _) => {
                 let args = self.to_wrapped_args(|id| {
-                    quote! {
-                        #id#field_suffix
+                    if has_effect {
+                        let id_val = format_ident!("{}_value", id);
+                        quote! {
+                            #id_val
+                        }
+                    } else {
+                        quote! {
+                            #id
+                        }
                     }
                 });
 
@@ -589,12 +597,22 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
         effect_holder_name
             .map(|n| {
                 let chains = conversion_cfg.to_args(|arg, _| {
-                    quote! { .chain(#arg.effects()) }
+                    let arg_effects = format_ident!("{}_effects", arg);
+                    quote! { .chain(#arg_effects) }
+                });
+                let vals_and_effects = conversion_cfg.each_arg(|arg, _| {
+                    let arg_val = format_ident!("{}_value", arg);
+                    let arg_effects = format_ident!("{}_effects", arg);
+                    quote! {
+                        let (#arg_val, #arg_effects) = #arg.into_value_and_effects();
+                    }
                 });
                 quote! {
-                    let effects = std::iter::empty()#chains.cloned().collect::<Vec<_>>().into_boxed_slice();
+                    #(#vals_and_effects)*
+                    let value = #case_match;
+                    let effects = std::iter::empty()#chains.collect::<Vec<_>>().into_boxed_slice();
 
-                    #ret #n::compose_from(#case_match, effects)
+                    #ret #n::compose_from(value, effects)
                 }
             })
             .unwrap_or_else(|| quote! { #ret #case_match})

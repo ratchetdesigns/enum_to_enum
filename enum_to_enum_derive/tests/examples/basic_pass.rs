@@ -98,8 +98,8 @@ impl<Value> WithEffects for EffectHolder<Value> {
         }
     }
 
-    fn effects(&self) -> &[Self::Effect] {
-        &self.effects
+    fn into_value_and_effects(self) -> (Self::Value, Box<dyn Iterator<Item = Self::Effect>>) {
+        (self.value, Box::new(self.effects.into_iter()))
     }
 }
 
