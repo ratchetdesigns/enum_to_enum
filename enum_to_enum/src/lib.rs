@@ -2,7 +2,7 @@
 
 //! # enum_to_enum
 //!
-//! enum_to_enum exposes a derive macro to easily generate possibly effectful enum-to-enum conversions.
+//! enum_to_enum exposes a derive macro to easily generate possibly effectful enum-to-enum conversions: `#[derive(FromEnum)]`.
 //!
 //! The destination enum must be annotated to specify one or more source enums we will generate
 //! [`From`] implementations for.

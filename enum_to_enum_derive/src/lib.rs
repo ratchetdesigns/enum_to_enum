@@ -1,3 +1,12 @@
+#![warn(missing_docs)]
+
+//! # enum_to_enum_derive
+//!
+//! enum_to_enum exposes a derive macro to easily generate possibly effectful enum-to-enum conversions: `#[derive(FromEnum)]`.
+//!
+//! enum_to_enum_derive contains the actual macro definition. Clients should depend on
+//! `enum_to_enum` instead of `enum_to_enum_derive`.
+
 extern crate proc_macro;
 
 mod error;
