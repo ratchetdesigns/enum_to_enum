@@ -174,4 +174,11 @@ fn main() {
             effects: vec![],
         },
     );
+    assert_eq!(
+        EffectHolder::<FallibleEffectDest>::from(FallibleSrc::C1(300u16)),
+        EffectHolder {
+            value: FallibleEffectDest::C2(300u16),
+            effects: vec![],
+        },
+    );
 }
