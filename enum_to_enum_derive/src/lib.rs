@@ -571,6 +571,7 @@ impl Parse for FromEnumAttr {
     }
 }
 
+// TODO: check cases in the order they are referenced in dest
 fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
     let parser = EnumParser::parse(input)?;
 
@@ -578,14 +579,25 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
     let effect_holder_name = &parser.effect_holder_name.as_ref();
     let has_effect = effect_holder_name.is_some();
     let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
-    let result_wrapper = |res: Ident| {
+    let result_wrapper = |case_match: TokenStream2, conversion_cfg: &ConversionCfg, should_return: bool| {
+        let ret = if should_return {
+            quote! { return }
+        } else {
+            quote! {}
+        };
+
         effect_holder_name
             .map(|n| {
+                let chains = conversion_cfg.to_args(|arg, _| {
+                    quote! { .chain(#arg.effects()) }
+                });
                 quote! {
-                    #n::new(#res, vec![])
+                    let effects = std::iter::empty()#chains.cloned().collect::<Vec<_>>().into_boxed_slice();
+
+                    #ret #n::compose_from(#case_match, effects)
                 }
             })
-            .unwrap_or_else(|| quote! { #res })
+            .unwrap_or_else(|| quote! { #ret #case_match})
     };
 
     let impls =
@@ -618,13 +630,12 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                                         let arg_res = format_ident!("{}_res", &arg);
                                         quote! { #arg_res }
                                     });
-                                let res = result_wrapper(format_ident!("value"));
+                                let res = result_wrapper(case_match, conversion_cfg, true);
 
                                 quote! {
                                     #(#arg_let)*
                                     if let (#lhs) = (#rhs) {
-                                        let value = #case_match;
-                                        return #res;
+                                        #res;
                                     }
                                 }
                             } else {
@@ -639,10 +650,9 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                                         let #arg: #full_type = #arg.into();
                                     }
                                 });
-                                let res = result_wrapper(format_ident!("value"));
+                                let res = result_wrapper(case_match, conversion_cfg, false);
                                 quote! {
                                     #(#lets)*
-                                    let value = #case_match;
                                     #res
                                 }
                             }

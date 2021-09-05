@@ -79,9 +79,10 @@ struct EffectHolder<Value> {
 
 impl From<String> for EffectHolder<String> {
     fn from(s: String) -> EffectHolder<String> {
+        let log = s.clone();
         EffectHolder {
             value: s,
-            effects: vec![],
+            effects: vec![MyEffect::Log(log)],
         }
     }
 }
@@ -120,7 +121,7 @@ impl TryFrom<u16> for EffectHolder<u8> {
         if u <= u8::MAX.into() {
             Ok(EffectHolder {
                 value: u as u8,
-                effects: vec![],
+                effects: vec![MyEffect::Log(format!("{}", u))],
             })
         } else {
             Err("No good")
@@ -137,7 +138,7 @@ impl TryFrom<u16> for EffectHolder<u16> {
         } else {
             Ok(EffectHolder {
                 value: u,
-                effects: vec![],
+                effects: vec![MyEffect::Log(format!("{}", u))],
             })
         }
     }
@@ -164,21 +165,21 @@ fn main() {
         EffectHolder::<EffectDest>::from(Src::Case1("hi".to_string())),
         EffectHolder {
             value: EffectDest::Case1("hi".to_string()),
-            effects: vec![],
+            effects: vec![MyEffect::Log("hi".to_string())],
         },
     );
     assert_eq!(
         EffectHolder::<FallibleEffectDest>::from(FallibleSrc::C1(100u16)),
         EffectHolder {
             value: FallibleEffectDest::C1(100u8),
-            effects: vec![],
+            effects: vec![MyEffect::Log("100".to_string())],
         },
     );
     assert_eq!(
         EffectHolder::<FallibleEffectDest>::from(FallibleSrc::C1(300u16)),
         EffectHolder {
             value: FallibleEffectDest::C2(300u16),
-            effects: vec![],
+            effects: vec![MyEffect::Log("300".to_string())],
         },
     );
 }
