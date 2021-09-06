@@ -21,7 +21,6 @@ use crate::parser::EnumParser;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use std::fs::File;
 
 /// You can add `#[derive(FromEnum)]` to any enum to generate a possibly effectful [`From`]
 /// implementation to convert from other source enums to the annotated destination enum.
@@ -179,9 +178,6 @@ pub fn derive_enum_from(input: TokenStream) -> TokenStream {
             #(#errors)*
         }
     });
-
-    let mut file = File::create("output.rs").expect("failed to create file");
-    std::io::Write::write_all(&mut file, result.to_string().as_bytes()).expect("failed to write");
 
     result.into()
 }
