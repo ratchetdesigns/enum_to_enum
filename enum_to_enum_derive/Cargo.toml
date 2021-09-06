@@ -19,4 +19,5 @@ proc-macro2 = "1.0.24"
 
 [dev-dependencies]
 trybuild = "1.0.25"
-enum_to_enum = { version = "0.1.0", path = "../enum_to_enum" }
+# removing the enum_to_enum dev dependency until enum_to_enum is released
+# enum_to_enum = { version = ">=0.1.0", path = "../enum_to_enum" }
