@@ -1,0 +1,45 @@
+error[E0599]: no method named `into_value_and_effects` found for struct `BadEffectHolder` in the current scope
+  --> $DIR/bad_effect_type_fail.rs:8:37
+   |
+8  | #[from_enum(Src, effect_container = BadEffectHolder)]
+   |                                     ^^^^^^^^^^^^^^^ method not found in `BadEffectHolder<String>`
+...
+13 | struct BadEffectHolder<V> {
+   | ------------------------- method `into_value_and_effects` not found for this
+   |
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `into_value_and_effects`, perhaps you need to implement it:
+           candidate #1: `WithEffects`
+
+error[E0277]: the trait bound `BadEffectHolder<String>: From<String>` is not satisfied
+ --> $DIR/bad_effect_type_fail.rs:7:10
+  |
+7 | #[derive(FromEnum)]
+  |          ^^^^^^^^ the trait `From<String>` is not implemented for `BadEffectHolder<String>`
+  |
+  = help: the following implementations were found:
+            <BadEffectHolder<EffectDest> as From<Src>>
+  = note: required because of the requirements on the impl of `Into<BadEffectHolder<String>>` for `String`
+  = note: this error originates in the derive macro `FromEnum` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no function or associated item named `compose_from` found for struct `BadEffectHolder` in the current scope
+  --> $DIR/bad_effect_type_fail.rs:8:37
+   |
+8  | #[from_enum(Src, effect_container = BadEffectHolder)]
+   |                                     ^^^^^^^^^^^^^^^ function or associated item not found in `BadEffectHolder<_>`
+...
+13 | struct BadEffectHolder<V> {
+   | ------------------------- function or associated item `compose_from` not found for this
+   |
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `compose_from`, perhaps you need to implement it:
+           candidate #1: `WithEffects`
+
+error[E0277]: the trait bound `BadEffectHolder<V>: WithEffects` is not satisfied
+ --> $DIR/bad_effect_type_fail.rs:8:37
+  |
+8 | #[from_enum(Src, effect_container = BadEffectHolder)]
+  |                                     ^^^^^^^^^^^^^^^
+  |                                     |
+  |                                     the trait `WithEffects` is not implemented for `BadEffectHolder<V>`
+  |                                     required by this bound in `assert_implements_with_effects`

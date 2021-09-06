@@ -20,7 +20,8 @@ use crate::ir::ConversionCfg;
 use crate::parser::EnumParser;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
+use syn::spanned::Spanned;
 
 /// You can add `#[derive(FromEnum)]` to any enum to generate a possibly effectful [`From`]
 /// implementation to convert from other source enums to the annotated destination enum.
@@ -290,11 +291,11 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                 let vals_and_effects = conversion_cfg.each_arg(|arg, _| {
                     let arg_val = format_ident!("{}_value", arg);
                     let arg_effects = format_ident!("{}_effects", arg);
-                    quote! {
+                    quote_spanned! {n.span()=>
                         let (#arg_val, #arg_effects) = #arg.into_value_and_effects();
                     }
                 });
-                quote! {
+                quote_spanned! {n.span()=>
                     #(#vals_and_effects)*
                     let value = #case_match;
                     let effects = std::iter::empty()#(#chains)*.collect::<Vec<_>>().into_boxed_slice();
@@ -319,17 +320,17 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
 
                             if use_try_from {
                                 let arg_let = conversion_cfg.each_arg(|arg, ty| {
-                                let arg_res = format_ident!("{}_res", &arg);
-                                let typ = effect_holder_name
-                                    .map(|n| {
-                                        quote! { #n<#ty> }
-                                    })
-                                    .unwrap_or_else(|| quote! { #ty });
+                                    let arg_res = format_ident!("{}_res", &arg);
+                                    let typ = effect_holder_name
+                                        .map(|n| {
+                                            quote! { #n<#ty> }
+                                        })
+                                        .unwrap_or_else(|| quote! { #ty });
 
-                                quote! {
-                                    let #arg_res: std::result::Result<#typ, _> = #arg.clone().try_into();
-                                }
-                            });
+                                    quote! {
+                                        let #arg_res: std::result::Result<#typ, _> = #arg.clone().try_into();
+                                    }
+                                });
                                 let lhs = conversion_cfg.to_args(|arg, _| quote! { Ok(#arg) });
                                 let rhs = conversion_cfg.to_args(|arg, _| {
                                     let arg_res = format_ident!("{}_res", &arg);
@@ -399,7 +400,23 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                 }
             });
 
+    let effect_guard = effect_holder_name
+        .map(|n| {
+            quote_spanned! {n.span()=>
+                const _: () = {
+                    fn assert_implements_with_effects<T: enum_to_enum::WithEffects>() {}
+
+                    fn assert_impls<V>() {
+                        assert_implements_with_effects::<#n<V>>();
+                    }
+                };
+            }
+        })
+        .unwrap_or_else(|| quote! {});
+
     Ok(quote! {
+        #effect_guard
+
         #(#impls)*
     })
 }
