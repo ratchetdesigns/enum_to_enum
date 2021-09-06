@@ -1,6 +1,6 @@
 # enum_to_enum &emsp; [![CI](https://github.com/ratchetdesigns/enum_to_enum/actions/workflows/ci.yml/badge.svg)](https://github.com/ratchetdesigns/enum_to_enum/actions/workflows/ci.yml)
 
-**enum_to_enum exposes a derive macro to easily generate possibly effectful enum-to-enum conversions: `#[derive(FromEnum)]`.
+**enum_to_enum exposes a derive macro to easily generate possibly effectful enum-to-enum conversions: `#[derive(FromEnum)]`.**
 
 ---
 
