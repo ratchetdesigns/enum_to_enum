@@ -199,7 +199,7 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
 
             effect_holder_name
             .map(|n| {
-                let chains = conversion_cfg.to_args(|arg, _| {
+                let chains = conversion_cfg.each_arg(|arg, _| {
                     let arg_effects = format_ident!("{}_effects", arg);
                     quote! { .chain(#arg_effects) }
                 });
@@ -213,7 +213,7 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                 quote! {
                     #(#vals_and_effects)*
                     let value = #case_match;
-                    let effects = std::iter::empty()#chains.collect::<Vec<_>>().into_boxed_slice();
+                    let effects = std::iter::empty()#(#chains)*.collect::<Vec<_>>().into_boxed_slice();
 
                     #ret #n::compose_from(value, effects)
                 }
