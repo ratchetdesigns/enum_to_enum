@@ -2,7 +2,7 @@
 name = "enum_to_enum"
 version = "0.1.0"
 authors = ["Adam Berger <adam@ratchetdesigns.com>"]
-license = "MIT or Apache-2.0"
+license = "MIT OR Apache-2.0"
 description = "Derives possibly effectful conversions between enums"
 include = ["README.md", "LICENSE-APACHE", "LICENSE-MIT", "src/**/*.rs", "README.md"]
 edition = "2018"
