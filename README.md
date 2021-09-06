@@ -1,4 +1,4 @@
-# enum_to_enum &emsp; [![CI](https://github.com/ratchetdesigns/enum_to_enum/actions/workflows/ci.yml/badge.svg)](https://github.com/ratchetdesigns/enum_to_enum/actions/workflows/ci.yml)
+# enum_to_enum &emsp; [![CI](https://github.com/ratchetdesigns/enum_to_enum/actions/workflows/ci.yml/badge.svg)](https://github.com/ratchetdesigns/enum_to_enum/actions/workflows/ci.yml) [![Latest Version](https://img.shields.io/crates/v/enum_to_enum.svg)](https://crates.io/crates/enum_to_enum) [![Rust Documentation](https://docs.rs/enum_to_enum/badge.svg)](https://docs.rs/enum_to_enum) ![Crates.io](https://img.shields.io/crates/l/enum_to_enum)
 
 **enum_to_enum exposes a derive macro to easily generate possibly effectful enum-to-enum conversions: `#[derive(FromEnum)]`.**
 
