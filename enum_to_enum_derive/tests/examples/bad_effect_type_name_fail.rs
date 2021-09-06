@@ -6,7 +6,9 @@ enum Src {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromEnum)]
-#[from_enum(Src, effect_typeS = nope)]
+#[from_enum(Src, effect_containerS = nope)]
 enum SimpleDest {
     Case1(String),
 }
+
+fn main() {}

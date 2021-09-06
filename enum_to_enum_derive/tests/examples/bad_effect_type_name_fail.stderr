@@ -1,0 +1,5 @@
+error: from_enum only accepts source enums and effect_container = YourEffectContainerImplementingWithEffects
+ --> $DIR/bad_effect_type_name_fail.rs:9:18
+  |
+9 | #[from_enum(Src, effect_containerS = nope)]
+  |                  ^^^^^^^^^^^^^^^^^

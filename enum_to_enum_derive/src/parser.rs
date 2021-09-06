@@ -98,16 +98,16 @@ impl<'ast> EnumParser {
         let enm: ItemEnum = parse2(input)?;
         visit_item_enum(&mut parser, &enm);
 
+        if !parser.errors.is_empty() {
+            return Err(parser.errors.into());
+        }
+
         if parser.src_names.is_empty() {
             return Err(ParseError::new(
                 enm.span(),
                 "#[from_enum(Src)] must appear at least once to specify the source enum(s)",
             )
             .into());
-        }
-
-        if !parser.errors.is_empty() {
-            return Err(parser.errors.into());
         }
 
         Ok(ParsedEnum {
