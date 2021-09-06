@@ -47,7 +47,7 @@ use quote::{format_ident, quote};
 /// 1-to-1 conversion from source to destination enum variants, demonstrating recursive, field-level
 /// conversions and from_case usage.
 ///
-/// ```
+/// ```rust
 /// # #[macro_use] extern crate enum_to_enum_derive;
 /// # fn main () {
 /// use enum_to_enum::FromEnum;
@@ -106,11 +106,11 @@ use quote::{format_ident, quote};
 /// # }
 /// ```
 ///
-/// ## Many-to-1 conversion
-/// Many-to-1 conversion, demonstrating mapping from many source variants to a single destination
+/// ## Many-to-one conversion
+/// Many-to-one conversion, demonstrating mapping from many source variants to a single destination
 /// variant, using whichever source variant's try_into succeeds.
 ///
-/// ```
+/// ```rust
 /// # #[macro_use] extern crate enum_to_enum_derive;
 /// # fn main () {
 /// use enum_to_enum::FromEnum;
@@ -170,6 +170,89 @@ use quote::{format_ident, quote};
 ///
 /// # }
 /// ```
+///
+/// ## Effectful conversion
+/// Effectful conversion, demonstrating an effect_container and effect combination.
+///
+/// ```rust
+/// # #[macro_use] extern crate enum_to_enum_derive;
+/// # fn main () {
+/// use enum_to_enum::{FromEnum, WithEffects};
+///
+/// #[derive(Debug)]
+/// enum Src {
+///     Case1(SrcField),
+///     Case2(SrcField, SrcField),
+/// }
+///
+/// #[derive(FromEnum, Debug, PartialEq, Eq)]
+/// #[from_enum(Src, effect_container = EffectContainer)]
+/// enum Dest {
+///     Case1(DestField),
+///     Case2(DestField, DestField),
+/// }
+///
+/// #[derive(Debug, PartialEq, Eq, Clone)]
+/// struct SrcField(String);
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// struct DestField(String);
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// enum Eff {
+///     Log(String),
+/// }
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// struct EffectContainer<Value> {
+///     value: Value,
+///     effects: Vec<Eff>,
+/// }
+///
+/// impl<Value> WithEffects for EffectContainer<Value> {
+///     type Value = Value;
+///     type Effect = Eff;
+///
+///     fn new(value: Self::Value, effects: Vec<Self::Effect>) -> Self {
+///         Self { value, effects }
+///     }
+///
+///     fn into_value_and_effects(self) -> (Self::Value, Box<dyn Iterator<Item = Self::Effect>>) {
+///         (self.value, Box::new(self.effects.into_iter()))
+///     }
+/// }
+///
+/// impl From<SrcField> for EffectContainer<DestField> {
+///     fn from(src: SrcField) -> EffectContainer<DestField> {
+///         let log = Eff::Log(format!("Log: {}", &src.0));
+///         EffectContainer {
+///             value: DestField(src.0),
+///             effects: vec![log],
+///         }
+///     }
+/// }
+///
+/// assert_eq!(
+///     EffectContainer::from(Src::Case1(SrcField(String::from("hello")))),
+///     EffectContainer {
+///         value: Dest::Case1(DestField(String::from("hello"))),
+///         effects: vec![Eff::Log(String::from("Log: hello"))],
+///     },
+/// );
+///
+/// assert_eq!(
+///     EffectContainer::from(Src::Case2(SrcField(String::from("hi")), SrcField(String::from("bye")))),
+///     EffectContainer {
+///         value: Dest::Case2(DestField(String::from("hi")), DestField(String::from("bye"))),
+///         effects: vec![
+///             Eff::Log(String::from("Log: hi")),
+///             Eff::Log(String::from("Log: bye")),
+///         ],
+///     },
+/// );
+///
+/// # }
+/// ```
 #[proc_macro_derive(FromEnum, attributes(from_enum, from_case))]
 pub fn derive_enum_from(input: TokenStream) -> TokenStream {
     let result = from_enum_internal(input.into()).unwrap_or_else(|err| {
@@ -189,15 +272,16 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
     let effect_holder_name = &parser.effect_holder_name.as_ref();
     let has_effect = effect_holder_name.is_some();
     let conversion_cfgs_by_src_case_by_src = parser.conversion_cfgs_by_src_case_by_src();
-    let result_wrapper =
-        |case_match: TokenStream2, conversion_cfg: &ConversionCfg, should_return: bool| {
-            let ret = if should_return {
-                quote! { return }
-            } else {
-                quote! {}
-            };
+    let result_wrapper = |case_match: TokenStream2,
+                          conversion_cfg: &ConversionCfg,
+                          should_return: bool| {
+        let ret = if should_return {
+            quote! { return }
+        } else {
+            quote! {}
+        };
 
-            effect_holder_name
+        effect_holder_name
             .map(|n| {
                 let chains = conversion_cfg.each_arg(|arg, _| {
                     let arg_effects = format_ident!("{}_effects", arg);
@@ -219,7 +303,7 @@ fn from_enum_internal(input: TokenStream2) -> Result<TokenStream2, Error> {
                 }
             })
             .unwrap_or_else(|| quote! { #ret #case_match})
-        };
+    };
 
     let impls =
         conversion_cfgs_by_src_case_by_src
