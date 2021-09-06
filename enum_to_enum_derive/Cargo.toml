@@ -1,7 +1,13 @@
 [package]
 name = "enum_to_enum_derive"
 version = "0.1.0"
+authors = ["Adam Berger <adam@ratchetdesigns.com>"]
+license = "MIT or Apache-2.0"
+description = "Derive macro implementation for enum_to_enum. enum_to_enum derives possibly effectful conversions between enums."
+include = ["README.md", "LICENSE-APACHE", "LICENSE-MIT", "src/**/*.rs", "README.md"]
 edition = "2018"
+readme = "README.md"
+repository = "https://github.com/ratchetdesigns/enum_to_enum"
 
 [lib]
 proc-macro = true

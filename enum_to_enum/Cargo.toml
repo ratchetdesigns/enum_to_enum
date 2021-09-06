@@ -2,10 +2,12 @@
 name = "enum_to_enum"
 version = "0.1.0"
 authors = ["Adam Berger <adam@ratchetdesigns.com>"]
-license = "MIT"
+license = "MIT or Apache-2.0"
 description = "Derives possibly effectful conversions between enums"
-include = ["README.md", "LICENSE-MIT", "src/**/*.rs"]
+include = ["README.md", "LICENSE-APACHE", "LICENSE-MIT", "src/**/*.rs", "README.md"]
 edition = "2018"
+readme = "README.md"
+repository = "https://github.com/ratchetdesigns/enum_to_enum"
 
 [dependencies]
 enum_to_enum_derive = { version = "=0.1.0", path = "../enum_to_enum_derive"}
